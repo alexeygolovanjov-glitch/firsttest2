@@ -164,6 +164,15 @@ async function renderDetails() {
       <p>${escapeHtml(movie.description || 'Описание пока не добавлено.')}</p>
       ${movie.source_url ? `<a class="source-link" href="${escapeHtml(movie.source_url)}" target="_blank" rel="noreferrer">Источник</a>` : ''}
 
+      <section class="player-tools">
+        <div>
+          <h3>Плееры</h3>
+          <p>${movie.kinopoisk_id ? `Кинопоиск ID: ${escapeHtml(movie.kinopoisk_id)}` : 'Для автопоиска нужен импорт из Кинопоиска.'}</p>
+        </div>
+        <button id="loadPlayers" type="button" ${movie.kinopoisk_id ? '' : 'disabled'}>Найти плееры</button>
+      </section>
+      <div id="playerChoices" class="player-choices"></div>
+
       <div class="controls-row">
         <select id="listSelect">
           ${Object.entries(statusLabels)
@@ -196,7 +205,58 @@ async function renderDetails() {
   bindDetailActions(movie.id)
 }
 
+function renderPlayerChoices(players) {
+  const container = document.querySelector('#playerChoices')
+  if (!players.length) {
+    container.innerHTML = '<p class="muted">Плееры не найдены для этого фильма.</p>'
+    return
+  }
+
+  container.innerHTML = players
+    .map(
+      (player) => `
+        <article>
+          <div>
+            <strong>${escapeHtml(player.name || player.translate || 'Плеер')}</strong>
+            <small>${escapeHtml(player.quality || player.source || '')}</small>
+          </div>
+          <button class="select-player" data-iframe="${escapeHtml(player.iframe)}" type="button">Выбрать</button>
+        </article>
+      `
+    )
+    .join('')
+}
+
 function bindDetailActions(movieId) {
+  document.querySelector('#loadPlayers').addEventListener('click', async (event) => {
+    const button = event.currentTarget
+    try {
+      button.disabled = true
+      button.textContent = 'Ищу...'
+      const players = await api(`/api/movies/${movieId}/players`)
+      renderPlayerChoices(players)
+    } catch (error) {
+      showToast('Не удалось получить плееры', 'error')
+      console.error(error)
+    } finally {
+      button.disabled = false
+      button.textContent = 'Найти плееры'
+    }
+  })
+
+  document.querySelector('#playerChoices').addEventListener('click', async (event) => {
+    const button = event.target.closest('.select-player')
+    if (!button) return
+
+    await runAdminAction(async () => {
+      await api(`/api/movies/${movieId}/player`, {
+        method: 'PUT',
+        body: JSON.stringify({ player_url: button.dataset.iframe })
+      })
+      await renderDetails()
+    }, 'Плеер выбран')
+  })
+
   document.querySelector('#listSelect').addEventListener('change', async (event) => {
     await runAdminAction(async () => {
       await api(`/api/movies/${movieId}/list`, {

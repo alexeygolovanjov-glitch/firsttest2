@@ -283,6 +283,53 @@ button {
   color: var(--accent-2);
 }
 
+.player-tools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin: 22px 0 12px;
+  padding-top: 18px;
+  border-top: 1px solid var(--line);
+}
+
+.player-tools h3 {
+  margin-bottom: 4px;
+}
+
+.player-tools p,
+.muted {
+  color: var(--muted);
+  margin-bottom: 0;
+}
+
+.player-choices {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 20px;
+}
+
+.player-choices article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.player-choices strong,
+.player-choices small {
+  display: block;
+}
+
+.player-choices small {
+  color: var(--muted);
+  margin-top: 3px;
+}
+
 .controls-row {
   display: grid;
   grid-template-columns: 1fr 90px auto;
@@ -413,5 +460,14 @@ dialog form {
 
   .internet-list button {
     grid-column: 1 / -1;
+  }
+
+  .player-tools,
+  .player-choices article {
+    grid-template-columns: 1fr;
+  }
+
+  .player-tools {
+    display: grid;
   }
 }

@@ -8,6 +8,9 @@ services:
       ADMIN_TOKEN: ${ADMIN_TOKEN:-change-this-token}
       DATABASE_PATH: ${DATABASE_PATH:-/data/app.db}
       KINOPOISK_API_KEY: ${KINOPOISK_API_KEY:-}
+      KINOBOX_API_URL: ${KINOBOX_API_URL:-https://api.kinobox.tv}
+      KINOBOX_REFERER: ${KINOBOX_REFERER:-https://tapeop.dev/}
+      KINOBOX_ORIGIN: ${KINOBOX_ORIGIN:-https://tapeop.dev}
     ports:
       - "${PORT:-8000}:8000"
     volumes:

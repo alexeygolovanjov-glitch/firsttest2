@@ -20,11 +20,15 @@ ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 DATABASE_PATH = Path(os.getenv("DATABASE_PATH", "/data/app.db"))
 KINOPOISK_API_KEY = os.getenv("KINOPOISK_API_KEY") or os.getenv("KINOPOISK_TECH_API_TOKEN", "")
 KINOPOISK_API_BASE = "https://kinopoiskapiunofficial.tech"
+KINOBOX_API_URL = os.getenv("KINOBOX_API_URL", "https://api.kinobox.tv").rstrip("/")
+KINOBOX_REFERER = os.getenv("KINOBOX_REFERER", "https://tapeop.dev/")
+KINOBOX_ORIGIN = os.getenv("KINOBOX_ORIGIN", "https://tapeop.dev")
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "static"
 
 
 class MovieIn(BaseModel):
+    kinopoisk_id: str = Field(default="", max_length=40)
     title: str = Field(min_length=1, max_length=180)
     original_title: str = Field(default="", max_length=180)
     year: int | None = Field(default=None, ge=1888, le=2100)
@@ -45,6 +49,10 @@ class RatingUpdate(BaseModel):
 
 class NoteUpdate(BaseModel):
     note: str = Field(max_length=4000)
+
+
+class PlayerUpdate(BaseModel):
+    player_url: str = Field(default="", max_length=1000)
 
 
 class CommentIn(BaseModel):
@@ -80,6 +88,7 @@ def init_db() -> None:
             """
             CREATE TABLE IF NOT EXISTS movies (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                kinopoisk_id TEXT NOT NULL DEFAULT '',
                 title TEXT NOT NULL,
                 original_title TEXT NOT NULL DEFAULT '',
                 year INTEGER,
@@ -112,9 +121,24 @@ def init_db() -> None:
             END;
             """
         )
+        ensure_column(conn, "movies", "kinopoisk_id", "TEXT NOT NULL DEFAULT ''")
+        conn.execute(
+            """
+            UPDATE movies
+            SET kinopoisk_id = replace(replace(source_url, 'https://www.kinopoisk.ru/film/', ''), '/', '')
+            WHERE kinopoisk_id = ''
+              AND source_url LIKE 'https://www.kinopoisk.ru/film/%'
+            """
+        )
         count = conn.execute("SELECT COUNT(*) AS total FROM movies").fetchone()["total"]
         if count == 0:
             seed_movies(conn)
+
+
+def ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    columns = [row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()]
+    if column not in columns:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 def seed_movies(conn: sqlite3.Connection) -> None:
@@ -194,6 +218,7 @@ def normalize_kinopoisk_search_item(item: dict[str, Any]) -> dict[str, Any]:
 def normalize_kinopoisk_film(payload: dict[str, Any]) -> dict[str, Any]:
     kp_id = payload.get("kinopoiskId") or payload.get("filmId")
     return {
+        "kinopoisk_id": str(kp_id or ""),
         "title": payload.get("nameRu") or payload.get("nameEn") or payload.get("nameOriginal") or "Без названия",
         "original_title": payload.get("nameEn") or payload.get("nameOriginal") or "",
         "year": payload.get("year"),
@@ -203,6 +228,68 @@ def normalize_kinopoisk_film(payload: dict[str, Any]) -> dict[str, Any]:
         "source_url": f"https://www.kinopoisk.ru/film/{kp_id}/" if kp_id else "",
         "genre": ", ".join(genre.get("genre", "") for genre in payload.get("genres", []) if genre.get("genre")),
     }
+
+
+def external_json_request(
+    url: str,
+    *,
+    params: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+) -> Any:
+    query = urllib.parse.urlencode({key: value for key, value in (params or {}).items() if value})
+    if query:
+        url = f"{url}?{query}"
+
+    request = urllib.request.Request(url, headers=headers or {}, method="GET")
+    try:
+        with urllib.request.urlopen(request, timeout=12) as response:
+            import json
+
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:500]
+        raise HTTPException(status_code=exc.code, detail=detail or "External API error") from exc
+    except urllib.error.URLError as exc:
+        raise HTTPException(status_code=502, detail=f"External API is unavailable: {exc.reason}") from exc
+
+
+def normalize_kinobox_players(providers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    players: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for provider in providers:
+        provider_name = str(provider.get("type") or "Kinobox").strip()
+        provider_iframe = str(provider.get("iframeUrl") or "").strip()
+        if provider_iframe and provider_iframe not in seen:
+            seen.add(provider_iframe)
+            players.append(
+                {
+                    "name": provider_name,
+                    "translate": provider_name,
+                    "iframe": provider_iframe,
+                    "quality": "",
+                    "source": "kinobox",
+                }
+            )
+
+        translations = provider.get("translations") if isinstance(provider.get("translations"), list) else []
+        for translation in translations:
+            iframe = str(translation.get("iframeUrl") or "").strip()
+            if not iframe or iframe in seen:
+                continue
+            seen.add(iframe)
+            translation_name = str(translation.get("name") or provider_name).strip()
+            players.append(
+                {
+                    "name": f"{provider_name} / {translation_name}",
+                    "translate": translation_name,
+                    "iframe": iframe,
+                    "quality": str(translation.get("quality") or ""),
+                    "source": "kinobox",
+                }
+            )
+
+    return players
 
 
 app = FastAPI(title=APP_NAME)
@@ -216,7 +303,12 @@ def on_startup() -> None:
 
 @app.get("/api/health")
 def health() -> dict[str, Any]:
-    return {"ok": True, "app": APP_NAME, "kinopoisk": bool(KINOPOISK_API_KEY)}
+    return {
+        "ok": True,
+        "app": APP_NAME,
+        "kinopoisk": bool(KINOPOISK_API_KEY),
+        "kinobox": bool(KINOBOX_API_URL),
+    }
 
 
 @app.get("/api/movies")
@@ -236,7 +328,7 @@ def list_movies(query: str = "", status: str = "all") -> list[dict[str, Any]]:
         rows = conn.execute(
             f"""
             SELECT id, title, original_title, year, description, poster_url, player_url,
-                   source_url, genre, list_status, rating, note, created_at, updated_at
+                   source_url, genre, list_status, rating, note, kinopoisk_id, created_at, updated_at
             FROM movies
             {where}
             ORDER BY updated_at DESC, id DESC
@@ -265,10 +357,11 @@ def import_kinopoisk_movie(kp_id: int) -> dict[str, Any]:
             return dict_from_row(existing)
         cursor = conn.execute(
             """
-            INSERT INTO movies(title, original_title, year, description, poster_url, player_url, source_url, genre)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO movies(kinopoisk_id, title, original_title, year, description, poster_url, player_url, source_url, genre)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                movie["kinopoisk_id"],
                 movie["title"],
                 movie["original_title"],
                 movie["year"],
@@ -288,10 +381,11 @@ def create_movie(payload: MovieIn) -> dict[str, Any]:
     with db() as conn:
         cursor = conn.execute(
             """
-            INSERT INTO movies(title, original_title, year, description, poster_url, player_url, source_url, genre)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO movies(kinopoisk_id, title, original_title, year, description, poster_url, player_url, source_url, genre)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                payload.kinopoisk_id,
                 payload.title,
                 payload.original_title,
                 payload.year,
@@ -350,6 +444,42 @@ def update_note(movie_id: int, payload: NoteUpdate) -> dict[str, Any]:
         if result.rowcount == 0:
             raise HTTPException(status_code=404, detail="Movie not found")
         return {"ok": True}
+
+
+@app.get("/api/movies/{movie_id}/players")
+def get_movie_players(movie_id: int) -> list[dict[str, Any]]:
+    with db() as conn:
+        row = conn.execute("SELECT kinopoisk_id, title FROM movies WHERE id = ?", (movie_id,)).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Movie not found")
+
+    kp_id = str(row["kinopoisk_id"] or "").strip()
+    if not kp_id:
+        return []
+
+    payload = external_json_request(
+        f"{KINOBOX_API_URL}/api/players",
+        params={"kinopoisk": kp_id, "title": row["title"]},
+        headers={
+            "Accept": "application/json",
+            "Referer": KINOBOX_REFERER,
+            "Origin": KINOBOX_ORIGIN,
+        },
+    )
+    providers = payload.get("data") if isinstance(payload, dict) else []
+    return normalize_kinobox_players(providers if isinstance(providers, list) else [])
+
+
+@app.put("/api/movies/{movie_id}/player", dependencies=[Depends(require_admin)])
+def update_player(movie_id: int, payload: PlayerUpdate) -> dict[str, Any]:
+    with db() as conn:
+        result = conn.execute(
+            "UPDATE movies SET player_url = ? WHERE id = ?",
+            (payload.player_url, movie_id),
+        )
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Movie not found")
+        return {"ok": True, "player_url": payload.player_url}
 
 
 @app.post("/api/movies/{movie_id}/comments", dependencies=[Depends(require_admin)])
