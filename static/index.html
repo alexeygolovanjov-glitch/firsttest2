@@ -22,7 +22,7 @@
       <main class="workspace">
         <section class="library">
           <div class="toolbar">
-            <input id="searchInput" type="search" placeholder="Поиск по названию или жанру" />
+            <input id="searchInput" type="search" placeholder="Найти фильм" />
             <select id="statusFilter" aria-label="Фильтр списка">
               <option value="all">Все</option>
               <option value="planned">В планах</option>
@@ -30,10 +30,8 @@
               <option value="watched">Просмотрено</option>
               <option value="favorite">Любимое</option>
             </select>
-            <button id="internetSearchButton" type="button">Кинопоиск</button>
             <button id="addButton">Добавить</button>
           </div>
-          <div id="internetResults" class="internet-results" hidden></div>
           <div id="movies" class="movie-grid" aria-live="polite"></div>
         </section>
 

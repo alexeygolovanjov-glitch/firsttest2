@@ -1,7 +1,10 @@
 const state = {
-  movies: [],
-  selectedId: null,
-  token: localStorage.getItem('adminToken') || ''
+  library: [],
+  searchResults: [],
+  selected: null,
+  selectedPlayer: null,
+  token: localStorage.getItem('adminToken') || '',
+  searchTimer: null
 }
 
 const moviesEl = document.querySelector('#movies')
@@ -12,8 +15,6 @@ const movieDialog = document.querySelector('#movieDialog')
 const movieForm = document.querySelector('#movieForm')
 const tokenStatus = document.querySelector('#tokenStatus')
 const toast = document.querySelector('#toast')
-const internetSearchButton = document.querySelector('#internetSearchButton')
-const internetResults = document.querySelector('#internetResults')
 
 const statusLabels = {
   none: 'Без списка',
@@ -40,6 +41,12 @@ async function api(path, options = {}) {
     throw new Error(text || `HTTP ${response.status}`)
   }
   return response.json()
+}
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (char) => {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char]
+  })
 }
 
 function showToast(message, type = 'ok') {
@@ -71,66 +78,112 @@ async function runAdminAction(action, successMessage) {
   }
 }
 
-function escapeHtml(value) {
-  return String(value ?? '').replace(/[&<>"']/g, (char) => {
-    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char]
-  })
+function currentItems() {
+  return searchInput.value.trim() ? state.searchResults : state.library
 }
 
-async function loadMovies() {
+function posterFor(movie) {
+  return movie.poster_url || '/assets/poster-placeholder.svg'
+}
+
+async function loadLibrary() {
   const params = new URLSearchParams()
-  if (searchInput.value.trim()) params.set('query', searchInput.value.trim())
   params.set('status', statusFilter.value)
-  state.movies = await api(`/api/movies?${params.toString()}`)
+  state.library = await api(`/api/movies?${params.toString()}`)
   renderMovies()
-  if (state.selectedId) {
-    const exists = state.movies.some((movie) => movie.id === state.selectedId)
-    if (!exists) state.selectedId = state.movies[0]?.id || null
-  } else {
-    state.selectedId = state.movies[0]?.id || null
+  if (!state.selected && state.library[0]) selectLibraryMovie(state.library[0].id)
+}
+
+async function searchRemote(query) {
+  if (query.length < 2) {
+    state.searchResults = []
+    renderMovies()
+    return
   }
-  renderDetails()
+
+  moviesEl.innerHTML = '<p class="muted">Ищу фильмы и плееры...</p>'
+  try {
+    state.searchResults = await api(`/api/search?query=${encodeURIComponent(query)}&limit=8`)
+    renderMovies()
+    if (state.searchResults[0]) selectSearchMovie(state.searchResults[0].kp_id)
+  } catch (error) {
+    const message = String(error.message || '')
+    if (message.includes('KINOPOISK_API_KEY')) {
+      moviesEl.innerHTML = '<p class="error">На сервере не задан KINOPOISK_API_KEY.</p>'
+      return
+    }
+    moviesEl.innerHTML = '<p class="error">Поиск сейчас не ответил.</p>'
+    console.error(error)
+  }
 }
 
 function renderMovies() {
-  moviesEl.innerHTML = state.movies
+  const items = currentItems()
+  const isSearch = Boolean(searchInput.value.trim())
+
+  if (!items.length) {
+    moviesEl.innerHTML = `<p class="muted">${isSearch ? 'Ничего не найдено.' : 'В библиотеке пока пусто.'}</p>`
+    return
+  }
+
+  moviesEl.innerHTML = items
     .map((movie) => {
-      const poster = movie.poster_url || '/assets/poster-placeholder.svg'
+      const id = isSearch ? movie.kp_id : movie.id
+      const active =
+        state.selected?.mode === (isSearch ? 'search' : 'library') && String(state.selected.id) === String(id)
+      const playerInfo = isSearch
+        ? `${movie.player_count || 0} плееров`
+        : statusLabels[movie.list_status] || 'Без списка'
       return `
-        <button class="movie-tile ${movie.id === state.selectedId ? 'active' : ''}" data-id="${movie.id}">
-          <img src="${escapeHtml(poster)}" alt="" loading="lazy" />
+        <button class="movie-tile ${active ? 'active' : ''}" data-id="${escapeHtml(id)}" data-mode="${isSearch ? 'search' : 'library'}">
+          <img src="${escapeHtml(posterFor(movie))}" alt="" loading="lazy" />
           <span>${escapeHtml(movie.title)}</span>
-          <small>${escapeHtml(movie.year || 'Без года')} · ${escapeHtml(statusLabels[movie.list_status] || 'Без списка')}</small>
+          <small>${escapeHtml(movie.year || 'Без года')} · ${escapeHtml(playerInfo)}</small>
         </button>
       `
     })
     .join('')
 }
 
-function renderInternetResults(results) {
-  if (!results.length) {
-    internetResults.hidden = false
-    internetResults.innerHTML = '<p>В Кинопоиске ничего не найдено.</p>'
-    return
-  }
+async function selectLibraryMovie(id) {
+  const movie = await api(`/api/movies/${id}`)
+  state.selected = { mode: 'library', id, movie }
+  state.selectedPlayer = movie.player_url
+    ? { name: 'Сохранённый плеер', iframe: movie.player_url, source: 'saved' }
+    : null
+  renderMovies()
+  renderDetails()
+}
 
-  internetResults.hidden = false
-  internetResults.innerHTML = `
-    <div class="internet-results-head">
-      <strong>Найдено в Кинопоиске</strong>
-      <button id="closeInternetResults" type="button">Скрыть</button>
-    </div>
-    <div class="internet-list">
-      ${results
+function selectSearchMovie(kpId) {
+  const movie = state.searchResults.find((item) => String(item.kp_id) === String(kpId))
+  if (!movie) return
+  state.selected = { mode: 'search', id: kpId, movie }
+  state.selectedPlayer = movie.players?.[0] || null
+  renderMovies()
+  renderDetails()
+}
+
+function playerMarkup() {
+  if (!state.selectedPlayer?.iframe) return '<div class="no-player">Плеер не найден</div>'
+  return `<iframe src="${escapeHtml(state.selectedPlayer.iframe)}" title="Плеер" allowfullscreen></iframe>`
+}
+
+function playersList(movie) {
+  const players = state.selected?.mode === 'search' ? movie.players || [] : state.selectedPlayer ? [state.selectedPlayer] : []
+  if (!players.length) return '<p class="muted">Для этого фильма KinoBD не вернул плееры.</p>'
+
+  return `
+    <div class="player-choices compact">
+      ${players
         .map(
-          (movie) => `
-            <article>
-              <img src="${escapeHtml(movie.poster_url || '/assets/poster-placeholder.svg')}" alt="" />
+          (player, index) => `
+            <article class="${state.selectedPlayer?.iframe === player.iframe ? 'active' : ''}">
               <div>
-                <strong>${escapeHtml(movie.title)}</strong>
-                <small>${escapeHtml(movie.year || 'Без года')} ${movie.genre ? `· ${escapeHtml(movie.genre)}` : ''}</small>
+                <strong>${escapeHtml(player.name || player.translate || `Плеер ${index + 1}`)}</strong>
+                <small>${escapeHtml([player.source, player.quality].filter(Boolean).join(' · '))}</small>
               </div>
-              <button class="import-kinopoisk" data-kp-id="${escapeHtml(movie.kp_id)}" type="button">Импорт</button>
+              <button class="select-player" data-index="${index}" type="button">Открыть</button>
             </article>
           `
         )
@@ -139,24 +192,22 @@ function renderInternetResults(results) {
   `
 }
 
-async function renderDetails() {
-  if (!state.selectedId) {
+function renderDetails() {
+  if (!state.selected) {
     detailsEl.innerHTML = `
       <div class="empty-state">
-        <span>Пока пусто</span>
-        <p>Добавь первый фильм с легальным embed URL или ссылкой на источник.</p>
+        <span>Найди фильм</span>
+        <p>Начни вводить название, и плееры появятся автоматически.</p>
       </div>
     `
     return
   }
 
-  const movie = await api(`/api/movies/${state.selectedId}`)
-  const player = movie.player_url
-    ? `<iframe src="${escapeHtml(movie.player_url)}" title="${escapeHtml(movie.title)}" allowfullscreen></iframe>`
-    : `<div class="no-player">Плеер не указан</div>`
+  const movie = state.selected.movie
+  const canSave = state.selected.mode === 'search'
 
   detailsEl.innerHTML = `
-    <div class="player">${player}</div>
+    <div class="player">${playerMarkup()}</div>
     <div class="detail-body">
       <p class="eyebrow">${escapeHtml(movie.genre || 'Фильм')}</p>
       <h2>${escapeHtml(movie.title)}</h2>
@@ -167,143 +218,95 @@ async function renderDetails() {
       <section class="player-tools">
         <div>
           <h3>Плееры</h3>
-          <p>${movie.kinopoisk_id ? `Кинопоиск ID: ${escapeHtml(movie.kinopoisk_id)}` : 'Для автопоиска нужен импорт из Кинопоиска.'}</p>
+          <p>${escapeHtml((state.selected.mode === 'search' ? movie.player_count : state.selectedPlayer ? 1 : 0) || 0)} найдено</p>
         </div>
-        <button id="loadPlayers" type="button" ${movie.kinopoisk_id ? '' : 'disabled'}>Найти плееры</button>
+        ${canSave ? '<button id="saveSearchMovie" type="button">Сохранить</button>' : ''}
       </section>
-      <div id="playerChoices" class="player-choices"></div>
+      ${playersList(movie)}
 
-      <div class="controls-row">
-        <select id="listSelect">
-          ${Object.entries(statusLabels)
-            .map(([value, label]) => `<option value="${value}" ${movie.list_status === value ? 'selected' : ''}>${label}</option>`)
-            .join('')}
-        </select>
-        <input id="ratingInput" type="number" min="1" max="10" value="${movie.rating || ''}" placeholder="1-10" />
-        <button id="saveRating">Оценить</button>
-      </div>
-
-      <label class="note-label">Заметка<textarea id="noteInput" rows="4">${escapeHtml(movie.note || '')}</textarea></label>
-      <button id="saveNote">Сохранить заметку</button>
-
-      <section class="comments">
-        <h3>Комментарии</h3>
-        <form id="commentForm">
-          <input name="author" placeholder="Имя" value="Я" />
-          <textarea name="content" rows="3" placeholder="Комментарий" required></textarea>
-          <button>Добавить</button>
-        </form>
-        <div class="comment-list">
-          ${(movie.comments || [])
-            .map((comment) => `<article><strong>${escapeHtml(comment.author)}</strong><p>${escapeHtml(comment.content)}</p></article>`)
-            .join('')}
-        </div>
-      </section>
-    </div>
-  `
-
-  bindDetailActions(movie.id)
-}
-
-function renderProviderDiagnostics(providers = []) {
-  if (!providers.length) return ''
-  return `
-    <div class="provider-diagnostics">
-      ${providers
-        .map((provider) => {
-          const status = provider.ok ? `${provider.count} найдено` : provider.error || 'ошибка'
-          const stateClass = provider.ok && provider.count > 0 ? 'ok' : 'warn'
-          return `
-            <span class="${stateClass}">
-              ${escapeHtml(provider.name)}: ${escapeHtml(status)}
-            </span>
-          `
-        })
-        .join('')}
-    </div>
-  `
-}
-
-function renderPlayerChoices(payload) {
-  const container = document.querySelector('#playerChoices')
-  const players = Array.isArray(payload) ? payload : payload.players || []
-  const diagnostics = Array.isArray(payload) ? '' : renderProviderDiagnostics(payload.providers || [])
-
-  if (!players.length) {
-    container.innerHTML = `${diagnostics}<p class="muted">Плееры не найдены для этого фильма.</p>`
-    return
-  }
-
-  container.innerHTML = `
-    ${diagnostics}
-    ${players
-      .map(
-        (player) => `
-          <article>
-            <div>
-              <strong>${escapeHtml(player.name || player.translate || 'Плеер')}</strong>
-              <small>${escapeHtml([player.source, player.quality].filter(Boolean).join(' · '))}</small>
+      ${
+        state.selected.mode === 'library'
+          ? `
+            <div class="controls-row">
+              <select id="listSelect">
+                ${Object.entries(statusLabels)
+                  .map(([value, label]) => `<option value="${value}" ${movie.list_status === value ? 'selected' : ''}>${label}</option>`)
+                  .join('')}
+              </select>
+              <input id="ratingInput" type="number" min="1" max="10" value="${movie.rating || ''}" placeholder="1-10" />
+              <button id="saveRating">Оценить</button>
             </div>
-            <button class="select-player" data-iframe="${escapeHtml(player.iframe)}" type="button">Выбрать</button>
-          </article>
-        `
-      )
-      .join('')}
+            <label class="note-label">Заметка<textarea id="noteInput" rows="4">${escapeHtml(movie.note || '')}</textarea></label>
+            <button id="saveNote">Сохранить заметку</button>
+          `
+          : ''
+      }
+    </div>
   `
+
+  bindDetailActions()
 }
 
-function bindDetailActions(movieId) {
-  document.querySelector('#loadPlayers').addEventListener('click', async (event) => {
-    const button = event.currentTarget
-    try {
-      button.disabled = true
-      button.textContent = 'Ищу...'
-      const players = await api(`/api/movies/${movieId}/players`)
-      renderPlayerChoices(players)
-    } catch (error) {
-      showToast('Не удалось получить плееры', 'error')
-      console.error(error)
-    } finally {
-      button.disabled = false
-      button.textContent = 'Найти плееры'
-    }
+function selectedPlayers() {
+  if (state.selected?.mode === 'search') return state.selected.movie.players || []
+  return state.selectedPlayer ? [state.selectedPlayer] : []
+}
+
+function bindDetailActions() {
+  document.querySelectorAll('.select-player').forEach((button) => {
+    button.addEventListener('click', () => {
+      const players = selectedPlayers()
+      state.selectedPlayer = players[Number(button.dataset.index)] || null
+      renderDetails()
+    })
   })
 
-  document.querySelector('#playerChoices').addEventListener('click', async (event) => {
-    const button = event.target.closest('.select-player')
-    if (!button) return
-
+  document.querySelector('#saveSearchMovie')?.addEventListener('click', async () => {
+    const movie = state.selected.movie
     await runAdminAction(async () => {
-      await api(`/api/movies/${movieId}/player`, {
-        method: 'PUT',
-        body: JSON.stringify({ player_url: button.dataset.iframe })
+      const saved = await api('/api/movies', {
+        method: 'POST',
+        body: JSON.stringify({
+          kinopoisk_id: movie.kp_id,
+          title: movie.title,
+          original_title: movie.original_title || '',
+          year: movie.year ? Number(movie.year) : null,
+          description: movie.description || '',
+          poster_url: movie.poster_url || '',
+          player_url: state.selectedPlayer?.iframe || '',
+          source_url: movie.kp_id ? `https://www.kinopoisk.ru/film/${movie.kp_id}/` : '',
+          genre: movie.genre || ''
+        })
       })
-      await renderDetails()
-    }, 'Плеер выбран')
+      await loadLibrary()
+      await selectLibraryMovie(saved.id)
+    }, 'Фильм сохранён')
   })
 
-  document.querySelector('#listSelect').addEventListener('change', async (event) => {
+  if (state.selected?.mode !== 'library') return
+  const movieId = state.selected.id
+
+  document.querySelector('#listSelect')?.addEventListener('change', async (event) => {
     await runAdminAction(async () => {
       await api(`/api/movies/${movieId}/list`, {
         method: 'PUT',
         body: JSON.stringify({ status: event.target.value })
       })
-      await loadMovies()
-    }, 'Статус сохранен')
+      await selectLibraryMovie(movieId)
+    }, 'Статус сохранён')
   })
 
-  document.querySelector('#saveRating').addEventListener('click', async () => {
+  document.querySelector('#saveRating')?.addEventListener('click', async () => {
     await runAdminAction(async () => {
-      const rating = Number(document.querySelector('#ratingInput').value)
       await api(`/api/movies/${movieId}/rating`, {
         method: 'PUT',
-        body: JSON.stringify({ rating })
+        body: JSON.stringify({ rating: Number(document.querySelector('#ratingInput').value) })
       })
-      await loadMovies()
+      await selectLibraryMovie(movieId)
     }, 'Оценка сохранена')
   })
 
-  document.querySelector('#saveNote').addEventListener('click', async () => {
+  document.querySelector('#saveNote')?.addEventListener('click', async () => {
     await runAdminAction(async () => {
       await api(`/api/movies/${movieId}/note`, {
         method: 'PUT',
@@ -311,75 +314,32 @@ function bindDetailActions(movieId) {
       })
     }, 'Заметка сохранена')
   })
-
-  document.querySelector('#commentForm').addEventListener('submit', async (event) => {
-    event.preventDefault()
-    await runAdminAction(async () => {
-      const form = new FormData(event.currentTarget)
-      await api(`/api/movies/${movieId}/comments`, {
-        method: 'POST',
-        body: JSON.stringify(Object.fromEntries(form))
-      })
-      await renderDetails()
-    }, 'Комментарий добавлен')
-  })
 }
 
 moviesEl.addEventListener('click', (event) => {
   const tile = event.target.closest('.movie-tile')
   if (!tile) return
-  state.selectedId = Number(tile.dataset.id)
-  renderMovies()
-  renderDetails()
+  if (tile.dataset.mode === 'search') {
+    selectSearchMovie(tile.dataset.id)
+  } else {
+    selectLibraryMovie(Number(tile.dataset.id))
+  }
 })
 
-searchInput.addEventListener('input', () => loadMovies())
-statusFilter.addEventListener('change', () => loadMovies())
-
-internetSearchButton.addEventListener('click', async () => {
-  const query = searchInput.value.trim()
-  if (!query) {
-    showToast('Введите название для поиска', 'error')
-    return
-  }
-
-  try {
-    internetSearchButton.disabled = true
-    internetSearchButton.textContent = 'Ищу...'
-    const results = await api(`/api/search/kinopoisk?query=${encodeURIComponent(query)}`)
-    renderInternetResults(results)
-  } catch (error) {
-    const message = String(error.message || '')
-    if (message.includes('KINOPOISK_API_KEY')) {
-      showToast('На сервере не задан KINOPOISK_API_KEY', 'error')
-      return
+searchInput.addEventListener('input', () => {
+  window.clearTimeout(state.searchTimer)
+  state.searchTimer = window.setTimeout(() => {
+    const query = searchInput.value.trim()
+    if (query) searchRemote(query)
+    else {
+      state.searchResults = []
+      renderMovies()
+      if (state.library[0]) selectLibraryMovie(state.library[0].id)
     }
-    showToast('Кинопоиск сейчас не ответил', 'error')
-    console.error(error)
-  } finally {
-    internetSearchButton.disabled = false
-    internetSearchButton.textContent = 'Кинопоиск'
-  }
+  }, 450)
 })
 
-internetResults.addEventListener('click', async (event) => {
-  if (event.target.id === 'closeInternetResults') {
-    internetResults.hidden = true
-    internetResults.innerHTML = ''
-    return
-  }
-
-  const button = event.target.closest('.import-kinopoisk')
-  if (!button) return
-
-  await runAdminAction(async () => {
-    const movie = await api(`/api/import/kinopoisk/${button.dataset.kpId}`, { method: 'POST' })
-    state.selectedId = movie.id
-    await loadMovies()
-    internetResults.hidden = true
-    internetResults.innerHTML = ''
-  }, 'Фильм импортирован')
-})
+statusFilter.addEventListener('change', () => loadLibrary())
 
 document.querySelector('#tokenButton').addEventListener('click', () => {
   const token = prompt('ADMIN_TOKEN из .env', state.token)
@@ -387,7 +347,7 @@ document.querySelector('#tokenButton').addEventListener('click', () => {
     state.token = token.trim()
     localStorage.setItem('adminToken', state.token)
     updateTokenStatus()
-    showToast(state.token ? 'Токен сохранен в браузере' : 'Токен очищен')
+    showToast(state.token ? 'Токен сохранён в браузере' : 'Токен очищен')
   }
 })
 
@@ -402,11 +362,11 @@ movieForm.addEventListener('submit', async (event) => {
     await api('/api/movies', { method: 'POST', body: JSON.stringify(data) })
     movieDialog.close()
     movieForm.reset()
-    await loadMovies()
+    await loadLibrary()
   }, 'Фильм добавлен')
 })
 
 updateTokenStatus()
-loadMovies().catch((error) => {
+loadLibrary().catch((error) => {
   moviesEl.innerHTML = `<p class="error">Ошибка загрузки: ${escapeHtml(error.message)}</p>`
 })

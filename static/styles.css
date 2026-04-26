@@ -99,7 +99,7 @@ h1 {
 
 .toolbar {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) 150px auto auto;
+  grid-template-columns: minmax(180px, 1fr) 150px auto;
   gap: 10px;
   margin-bottom: 18px;
 }
@@ -139,58 +139,6 @@ button {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   gap: 14px;
-}
-
-.internet-results {
-  margin-bottom: 18px;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: rgba(23, 27, 25, 0.72);
-}
-
-.internet-results-head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.internet-results-head button {
-  background: transparent;
-  color: var(--muted);
-  border: 1px solid var(--line);
-}
-
-.internet-list {
-  display: grid;
-  gap: 10px;
-}
-
-.internet-list article {
-  display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-}
-
-.internet-list img {
-  width: 44px;
-  height: 66px;
-  object-fit: cover;
-  border-radius: 6px;
-  background: #262b28;
-}
-
-.internet-list strong,
-.internet-list small {
-  display: block;
-}
-
-.internet-list small {
-  color: var(--muted);
-  margin-top: 3px;
 }
 
 .movie-tile {
@@ -318,6 +266,10 @@ button {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.04);
+}
+
+.player-choices article.active {
+  border-color: var(--accent);
 }
 
 .provider-diagnostics {
@@ -479,14 +431,6 @@ dialog form {
   .toolbar,
   .controls-row {
     grid-template-columns: 1fr;
-  }
-
-  .internet-list article {
-    grid-template-columns: 44px minmax(0, 1fr);
-  }
-
-  .internet-list button {
-    grid-column: 1 / -1;
   }
 
   .player-tools,

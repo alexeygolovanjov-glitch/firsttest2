@@ -20,11 +20,6 @@ ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 DATABASE_PATH = Path(os.getenv("DATABASE_PATH", "/data/app.db"))
 KINOPOISK_API_KEY = os.getenv("KINOPOISK_API_KEY") or os.getenv("KINOPOISK_TECH_API_TOKEN", "")
 KINOPOISK_API_BASE = "https://kinopoiskapiunofficial.tech"
-KINOBOX_API_URL = os.getenv("KINOBOX_API_URL", "https://api.kinobox.tv").rstrip("/")
-KINOBOX_REFERER = os.getenv("KINOBOX_REFERER", "https://tapeop.dev/")
-KINOBOX_ORIGIN = os.getenv("KINOBOX_ORIGIN", "https://tapeop.dev")
-KODIK_TOKEN = os.getenv("KODIK_TOKEN", "")
-KODIK_API_URL = os.getenv("KODIK_API_URL", "https://kodikapi.com").rstrip("/")
 KINOBD_API_URL = os.getenv("KINOBD_API_URL", "https://kinobd.net").rstrip("/")
 KINOBD_TOKEN = os.getenv("KINOBD_TOKEN", "")
 PLAYER_API_USER_AGENT = os.getenv(
@@ -356,45 +351,6 @@ def extract_iframe_url(value: Any, base_url: str) -> str:
     return ""
 
 
-def normalize_kinobox_players(providers: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    players: list[dict[str, Any]] = []
-    seen: set[str] = set()
-
-    for provider in providers:
-        provider_name = str(provider.get("type") or "Kinobox").strip()
-        provider_iframe = str(provider.get("iframeUrl") or "").strip()
-        if provider_iframe and provider_iframe not in seen:
-            seen.add(provider_iframe)
-            players.append(
-                {
-                    "name": provider_name,
-                    "translate": provider_name,
-                    "iframe": provider_iframe,
-                    "quality": "",
-                    "source": "kinobox",
-                }
-            )
-
-        translations = provider.get("translations") if isinstance(provider.get("translations"), list) else []
-        for translation in translations:
-            iframe = str(translation.get("iframeUrl") or "").strip()
-            if not iframe or iframe in seen:
-                continue
-            seen.add(iframe)
-            translation_name = str(translation.get("name") or provider_name).strip()
-            players.append(
-                {
-                    "name": f"{provider_name} / {translation_name}",
-                    "translate": translation_name,
-                    "iframe": iframe,
-                    "quality": str(translation.get("quality") or ""),
-                    "source": "kinobox",
-                }
-            )
-
-    return players
-
-
 def normalize_kinobd_provider_map(provider_map: dict[str, Any]) -> list[dict[str, Any]]:
     players: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -442,65 +398,6 @@ def normalize_kinobd_candidates(rows: list[dict[str, Any]]) -> list[dict[str, An
         )
 
     return players
-
-
-def normalize_kodik_players(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    players: list[dict[str, Any]] = []
-    seen: set[str] = set()
-
-    for index, item in enumerate(results, start=1):
-        iframe = str(item.get("link") or "").strip()
-        if not iframe:
-            continue
-        if iframe.startswith("//"):
-            iframe = f"https:{iframe}"
-        elif not iframe.startswith(("http://", "https://")):
-            iframe = f"https://{iframe.lstrip('/')}"
-
-        if iframe in seen:
-            continue
-        seen.add(iframe)
-
-        translation = item.get("translation") if isinstance(item.get("translation"), dict) else {}
-        title = str(translation.get("title") or item.get("title") or f"Kodik {index}").strip()
-        players.append(
-            {
-                "name": f"Kodik / {title}",
-                "translate": title,
-                "iframe": iframe,
-                "quality": str(item.get("quality") or ""),
-                "source": "kodik",
-            }
-        )
-
-    return players
-
-
-def get_kinobox_players(kp_id: str, title: str) -> list[dict[str, Any]]:
-    payload = external_json_request(
-        f"{KINOBOX_API_URL}/api/players",
-        params={"kinopoisk": kp_id, "title": title},
-        headers={
-            "Accept": "application/json",
-            "Referer": KINOBOX_REFERER,
-            "Origin": KINOBOX_ORIGIN,
-        },
-    )
-    providers = payload.get("data") if isinstance(payload, dict) else []
-    return normalize_kinobox_players(providers if isinstance(providers, list) else [])
-
-
-def get_kodik_players(kp_id: str) -> list[dict[str, Any]]:
-    if not KODIK_TOKEN:
-        return []
-
-    payload = external_json_request(
-        f"{KODIK_API_URL}/search",
-        params={"token": KODIK_TOKEN, "kinopoisk_id": kp_id},
-        headers={"Accept": "application/json"},
-    )
-    results = payload.get("results") if isinstance(payload, dict) else []
-    return normalize_kodik_players(results if isinstance(results, list) else [])
 
 
 def get_kinobd_players(kp_id: str) -> list[dict[str, Any]]:
@@ -600,8 +497,6 @@ def health() -> dict[str, Any]:
         "ok": True,
         "app": APP_NAME,
         "kinopoisk": bool(KINOPOISK_API_KEY),
-        "kinobox": bool(KINOBOX_API_URL),
-        "kodik": bool(KODIK_TOKEN),
         "kinobd": bool(KINOBD_API_URL),
     }
 
@@ -640,6 +535,33 @@ def search_kinopoisk(query: str) -> list[dict[str, Any]]:
     payload = kinopoisk_request("/api/v2.1/films/search-by-keyword", {"keyword": query.strip(), "page": 1})
     films = payload.get("films") or []
     return [normalize_kinopoisk_search_item(item) for item in films if item.get("filmId") or item.get("kinopoiskId")]
+
+
+@app.get("/api/search")
+def search_with_players(query: str, limit: int = 8) -> list[dict[str, Any]]:
+    if not query.strip():
+        return []
+    safe_limit = max(1, min(limit, 12))
+    payload = kinopoisk_request("/api/v2.1/films/search-by-keyword", {"keyword": query.strip(), "page": 1})
+    films = payload.get("films") or []
+    results: list[dict[str, Any]] = []
+
+    for item in films[:safe_limit]:
+        if not (item.get("filmId") or item.get("kinopoiskId")):
+            continue
+        movie = normalize_kinopoisk_search_item(item)
+        players: list[dict[str, Any]] = []
+        player_error = ""
+        try:
+            players = get_kinobd_players(movie["kp_id"])
+        except Exception as exc:
+            player_error = str(exc)[:220]
+        movie["players"] = players
+        movie["player_count"] = len(players)
+        movie["player_error"] = player_error
+        results.append(movie)
+
+    return results
 
 
 @app.post("/api/import/kinopoisk/{kp_id}", dependencies=[Depends(require_admin)])
@@ -756,43 +678,21 @@ def get_movie_players(movie_id: int) -> dict[str, Any]:
             "message": "kinopoisk_id is missing",
         }
 
-    kinobox_players: list[dict[str, Any]] = []
-    kodik_players: list[dict[str, Any]] = []
     kinobd_players: list[dict[str, Any]] = []
     statuses = [
-        provider_status("Kinobox", bool(KINOBOX_API_URL)),
-        provider_status("Kodik", bool(KODIK_TOKEN)),
         provider_status("KinoBD", bool(KINOBD_API_URL)),
     ]
 
     try:
-        kinobox_players = get_kinobox_players(kp_id, str(row["title"] or ""))
+        kinobd_players = get_kinobd_players(kp_id)
         statuses[0]["ok"] = True
-        statuses[0]["count"] = len(kinobox_players)
+        statuses[0]["count"] = len(kinobd_players)
         statuses[0]["error"] = ""
     except Exception as exc:
         statuses[0]["error"] = str(exc)[:220]
-        kinobox_players = []
-
-    try:
-        kodik_players = get_kodik_players(kp_id)
-        statuses[1]["ok"] = True
-        statuses[1]["count"] = len(kodik_players)
-        statuses[1]["error"] = "" if KODIK_TOKEN else "not configured"
-    except Exception as exc:
-        statuses[1]["error"] = str(exc)[:220]
-        kodik_players = []
-
-    try:
-        kinobd_players = get_kinobd_players(kp_id)
-        statuses[2]["ok"] = True
-        statuses[2]["count"] = len(kinobd_players)
-        statuses[2]["error"] = ""
-    except Exception as exc:
-        statuses[2]["error"] = str(exc)[:220]
         kinobd_players = []
 
-    players = merge_players(kinobox_players, kodik_players, kinobd_players)
+    players = merge_players(kinobd_players)
     return {
         "players": players,
         "providers": statuses,
