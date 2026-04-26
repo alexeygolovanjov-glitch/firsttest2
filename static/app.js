@@ -10,6 +10,8 @@ const searchInput = document.querySelector('#searchInput')
 const statusFilter = document.querySelector('#statusFilter')
 const movieDialog = document.querySelector('#movieDialog')
 const movieForm = document.querySelector('#movieForm')
+const tokenStatus = document.querySelector('#tokenStatus')
+const toast = document.querySelector('#toast')
 
 const statusLabels = {
   none: 'Без списка',
@@ -36,6 +38,35 @@ async function api(path, options = {}) {
     throw new Error(text || `HTTP ${response.status}`)
   }
   return response.json()
+}
+
+function showToast(message, type = 'ok') {
+  toast.textContent = message
+  toast.className = `toast visible ${type}`
+  window.clearTimeout(showToast.timeout)
+  showToast.timeout = window.setTimeout(() => {
+    toast.className = 'toast'
+  }, 3200)
+}
+
+function updateTokenStatus() {
+  tokenStatus.textContent = state.token ? 'Токен задан' : 'Токен не задан'
+  tokenStatus.classList.toggle('active', Boolean(state.token))
+}
+
+async function runAdminAction(action, successMessage) {
+  try {
+    await action()
+    showToast(successMessage)
+  } catch (error) {
+    const message = String(error.message || '')
+    if (message.includes('401')) {
+      showToast('Токен не подошел. Проверь ADMIN_TOKEN в .env', 'error')
+      return
+    }
+    showToast('Ошибка: действие не выполнено', 'error')
+    console.error(error)
+  }
 }
 
 function escapeHtml(value) {
@@ -133,37 +164,45 @@ async function renderDetails() {
 
 function bindDetailActions(movieId) {
   document.querySelector('#listSelect').addEventListener('change', async (event) => {
-    await api(`/api/movies/${movieId}/list`, {
-      method: 'PUT',
-      body: JSON.stringify({ status: event.target.value })
-    })
-    await loadMovies()
+    await runAdminAction(async () => {
+      await api(`/api/movies/${movieId}/list`, {
+        method: 'PUT',
+        body: JSON.stringify({ status: event.target.value })
+      })
+      await loadMovies()
+    }, 'Статус сохранен')
   })
 
   document.querySelector('#saveRating').addEventListener('click', async () => {
-    const rating = Number(document.querySelector('#ratingInput').value)
-    await api(`/api/movies/${movieId}/rating`, {
-      method: 'PUT',
-      body: JSON.stringify({ rating })
-    })
-    await loadMovies()
+    await runAdminAction(async () => {
+      const rating = Number(document.querySelector('#ratingInput').value)
+      await api(`/api/movies/${movieId}/rating`, {
+        method: 'PUT',
+        body: JSON.stringify({ rating })
+      })
+      await loadMovies()
+    }, 'Оценка сохранена')
   })
 
   document.querySelector('#saveNote').addEventListener('click', async () => {
-    await api(`/api/movies/${movieId}/note`, {
-      method: 'PUT',
-      body: JSON.stringify({ note: document.querySelector('#noteInput').value })
-    })
+    await runAdminAction(async () => {
+      await api(`/api/movies/${movieId}/note`, {
+        method: 'PUT',
+        body: JSON.stringify({ note: document.querySelector('#noteInput').value })
+      })
+    }, 'Заметка сохранена')
   })
 
   document.querySelector('#commentForm').addEventListener('submit', async (event) => {
     event.preventDefault()
-    const form = new FormData(event.currentTarget)
-    await api(`/api/movies/${movieId}/comments`, {
-      method: 'POST',
-      body: JSON.stringify(Object.fromEntries(form))
-    })
-    await renderDetails()
+    await runAdminAction(async () => {
+      const form = new FormData(event.currentTarget)
+      await api(`/api/movies/${movieId}/comments`, {
+        method: 'POST',
+        body: JSON.stringify(Object.fromEntries(form))
+      })
+      await renderDetails()
+    }, 'Комментарий добавлен')
   })
 }
 
@@ -183,6 +222,8 @@ document.querySelector('#tokenButton').addEventListener('click', () => {
   if (token !== null) {
     state.token = token.trim()
     localStorage.setItem('adminToken', state.token)
+    updateTokenStatus()
+    showToast(state.token ? 'Токен сохранен в браузере' : 'Токен очищен')
   }
 })
 
@@ -191,14 +232,17 @@ document.querySelector('#cancelMovie').addEventListener('click', () => movieDial
 
 movieForm.addEventListener('submit', async (event) => {
   event.preventDefault()
-  const data = Object.fromEntries(new FormData(movieForm))
-  data.year = data.year ? Number(data.year) : null
-  await api('/api/movies', { method: 'POST', body: JSON.stringify(data) })
-  movieDialog.close()
-  movieForm.reset()
-  await loadMovies()
+  await runAdminAction(async () => {
+    const data = Object.fromEntries(new FormData(movieForm))
+    data.year = data.year ? Number(data.year) : null
+    await api('/api/movies', { method: 'POST', body: JSON.stringify(data) })
+    movieDialog.close()
+    movieForm.reset()
+    await loadMovies()
+  }, 'Фильм добавлен')
 })
 
+updateTokenStatus()
 loadMovies().catch((error) => {
   moviesEl.innerHTML = `<p class="error">Ошибка загрузки: ${escapeHtml(error.message)}</p>`
 })

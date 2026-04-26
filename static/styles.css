@@ -52,6 +52,22 @@ button {
   border-bottom: 1px solid var(--line);
 }
 
+.admin-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.admin-box span {
+  color: var(--muted);
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.admin-box span.active {
+  color: var(--accent);
+}
+
 .eyebrow {
   margin: 0 0 6px;
   color: var(--accent);
@@ -291,6 +307,37 @@ dialog form {
 
 .error {
   color: #ff9f9f;
+}
+
+.toast {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  max-width: min(420px, calc(100% - 36px));
+  padding: 13px 16px;
+  border-radius: 8px;
+  background: var(--panel-2);
+  color: var(--text);
+  border: 1px solid var(--line);
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(8px);
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
+}
+
+.toast.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.toast.ok {
+  border-color: var(--accent);
+}
+
+.toast.error {
+  border-color: #ff9f9f;
 }
 
 @media (max-width: 920px) {

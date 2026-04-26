@@ -13,7 +13,10 @@
           <p class="eyebrow">Личный кинотеатр</p>
           <h1>FirstTest Cinema</h1>
         </div>
-        <button id="tokenButton" class="icon-button" title="Админ-токен">⚙</button>
+        <div class="admin-box">
+          <span id="tokenStatus">Токен не задан</span>
+          <button id="tokenButton" class="icon-button" title="Админ-токен">⚙</button>
+        </div>
       </header>
 
       <main class="workspace">
@@ -58,6 +61,7 @@
       </form>
     </dialog>
 
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script src="/assets/app.js" type="module"></script>
   </body>
 </html>
