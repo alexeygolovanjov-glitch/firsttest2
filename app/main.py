@@ -366,6 +366,16 @@ def merge_players(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return players
 
 
+def provider_status(name: str, configured: bool) -> dict[str, Any]:
+    return {
+        "name": name,
+        "configured": configured,
+        "ok": False,
+        "count": 0,
+        "error": "" if configured else "not configured",
+    }
+
+
 app = FastAPI(title=APP_NAME)
 app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")
 
@@ -522,7 +532,7 @@ def update_note(movie_id: int, payload: NoteUpdate) -> dict[str, Any]:
 
 
 @app.get("/api/movies/{movie_id}/players")
-def get_movie_players(movie_id: int) -> list[dict[str, Any]]:
+def get_movie_players(movie_id: int) -> dict[str, Any]:
     with db() as conn:
         row = conn.execute("SELECT kinopoisk_id, title FROM movies WHERE id = ?", (movie_id,)).fetchone()
         if not row:
@@ -530,22 +540,43 @@ def get_movie_players(movie_id: int) -> list[dict[str, Any]]:
 
     kp_id = str(row["kinopoisk_id"] or "").strip()
     if not kp_id:
-        return []
+        return {
+            "players": [],
+            "providers": [],
+            "message": "kinopoisk_id is missing",
+        }
 
     kinobox_players: list[dict[str, Any]] = []
     kodik_players: list[dict[str, Any]] = []
+    statuses = [
+        provider_status("Kinobox", bool(KINOBOX_API_URL)),
+        provider_status("Kodik", bool(KODIK_TOKEN)),
+    ]
 
     try:
         kinobox_players = get_kinobox_players(kp_id, str(row["title"] or ""))
-    except Exception:
+        statuses[0]["ok"] = True
+        statuses[0]["count"] = len(kinobox_players)
+        statuses[0]["error"] = ""
+    except Exception as exc:
+        statuses[0]["error"] = str(exc)[:220]
         kinobox_players = []
 
     try:
         kodik_players = get_kodik_players(kp_id)
-    except Exception:
+        statuses[1]["ok"] = True
+        statuses[1]["count"] = len(kodik_players)
+        statuses[1]["error"] = "" if KODIK_TOKEN else "not configured"
+    except Exception as exc:
+        statuses[1]["error"] = str(exc)[:220]
         kodik_players = []
 
-    return merge_players(kinobox_players, kodik_players)
+    players = merge_players(kinobox_players, kodik_players)
+    return {
+        "players": players,
+        "providers": statuses,
+        "message": "" if players else "no players found",
+    }
 
 
 @app.put("/api/movies/{movie_id}/player", dependencies=[Depends(require_admin)])

@@ -320,6 +320,33 @@ button {
   background: rgba(255, 255, 255, 0.04);
 }
 
+.provider-diagnostics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.provider-diagnostics span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 4px 9px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.86rem;
+}
+
+.provider-diagnostics span.ok {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.provider-diagnostics span.warn {
+  border-color: #766f51;
+}
+
 .player-choices strong,
 .player-choices small {
   display: block;

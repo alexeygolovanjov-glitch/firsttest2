@@ -205,26 +205,51 @@ async function renderDetails() {
   bindDetailActions(movie.id)
 }
 
-function renderPlayerChoices(players) {
+function renderProviderDiagnostics(providers = []) {
+  if (!providers.length) return ''
+  return `
+    <div class="provider-diagnostics">
+      ${providers
+        .map((provider) => {
+          const status = provider.ok ? `${provider.count} найдено` : provider.error || 'ошибка'
+          const stateClass = provider.ok && provider.count > 0 ? 'ok' : 'warn'
+          return `
+            <span class="${stateClass}">
+              ${escapeHtml(provider.name)}: ${escapeHtml(status)}
+            </span>
+          `
+        })
+        .join('')}
+    </div>
+  `
+}
+
+function renderPlayerChoices(payload) {
   const container = document.querySelector('#playerChoices')
+  const players = Array.isArray(payload) ? payload : payload.players || []
+  const diagnostics = Array.isArray(payload) ? '' : renderProviderDiagnostics(payload.providers || [])
+
   if (!players.length) {
-    container.innerHTML = '<p class="muted">Плееры не найдены для этого фильма.</p>'
+    container.innerHTML = `${diagnostics}<p class="muted">Плееры не найдены для этого фильма.</p>`
     return
   }
 
-  container.innerHTML = players
-    .map(
-      (player) => `
-        <article>
-          <div>
-            <strong>${escapeHtml(player.name || player.translate || 'Плеер')}</strong>
-            <small>${escapeHtml(player.quality || player.source || '')}</small>
-          </div>
-          <button class="select-player" data-iframe="${escapeHtml(player.iframe)}" type="button">Выбрать</button>
-        </article>
-      `
-    )
-    .join('')
+  container.innerHTML = `
+    ${diagnostics}
+    ${players
+      .map(
+        (player) => `
+          <article>
+            <div>
+              <strong>${escapeHtml(player.name || player.translate || 'Плеер')}</strong>
+              <small>${escapeHtml([player.source, player.quality].filter(Boolean).join(' · '))}</small>
+            </div>
+            <button class="select-player" data-iframe="${escapeHtml(player.iframe)}" type="button">Выбрать</button>
+          </article>
+        `
+      )
+      .join('')}
+  `
 }
 
 function bindDetailActions(movieId) {
