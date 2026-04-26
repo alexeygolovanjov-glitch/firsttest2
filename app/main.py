@@ -27,6 +27,11 @@ KODIK_TOKEN = os.getenv("KODIK_TOKEN", "")
 KODIK_API_URL = os.getenv("KODIK_API_URL", "https://kodikapi.com").rstrip("/")
 KINOBD_API_URL = os.getenv("KINOBD_API_URL", "https://kinobd.net").rstrip("/")
 KINOBD_TOKEN = os.getenv("KINOBD_TOKEN", "")
+PLAYER_API_USER_AGENT = os.getenv(
+    "PLAYER_API_USER_AGENT",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+)
 KINOBD_PLAYER_PROVIDERS = ",".join(
     [
         "collaps",
@@ -275,7 +280,8 @@ def external_json_request(
     if query:
         url = f"{url}?{query}"
 
-    request = urllib.request.Request(url, headers=headers or {}, method="GET")
+    request_headers = {"User-Agent": PLAYER_API_USER_AGENT, **(headers or {})}
+    request = urllib.request.Request(url, headers=request_headers, method="GET")
     try:
         with urllib.request.urlopen(request, timeout=12) as response:
             import json
@@ -300,7 +306,11 @@ def external_form_request(
         url = f"{url}?{query}"
 
     body = urllib.parse.urlencode({key: value for key, value in (data or {}).items() if value is not None}).encode()
-    request_headers = {"Content-Type": "application/x-www-form-urlencoded", **(headers or {})}
+    request_headers = {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "User-Agent": PLAYER_API_USER_AGENT,
+        **(headers or {}),
+    }
     request = urllib.request.Request(url, data=body, headers=request_headers, method="POST")
 
     try:
