@@ -7,6 +7,7 @@ services:
       APP_NAME: ${APP_NAME:-FirstTest Cinema}
       ADMIN_TOKEN: ${ADMIN_TOKEN:-change-this-token}
       DATABASE_PATH: ${DATABASE_PATH:-/data/app.db}
+      KINOPOISK_API_KEY: ${KINOPOISK_API_KEY:-}
     ports:
       - "${PORT:-8000}:8000"
     volumes:
