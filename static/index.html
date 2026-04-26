@@ -7,15 +7,25 @@
     <link rel="stylesheet" href="/assets/styles.css" />
   </head>
   <body>
-    <div class="shell">
+    <div id="lockScreen" class="lock-screen">
+      <form id="loginForm" class="login-panel">
+        <p class="eyebrow">Личный кинотеатр</p>
+        <h1>FirstTest Cinema</h1>
+        <input id="passwordInput" type="password" placeholder="Пароль" autocomplete="current-password" required />
+        <button type="submit">Войти</button>
+        <p id="loginError" class="error" hidden>Пароль не подошел</p>
+      </form>
+    </div>
+
+    <div id="appShell" class="shell app-hidden">
       <header class="topbar">
         <div>
           <p class="eyebrow">Личный кинотеатр</p>
           <h1>FirstTest Cinema</h1>
         </div>
         <div class="admin-box">
-          <span id="tokenStatus">Токен не задан</span>
-          <button id="tokenButton" class="icon-button" title="Админ-токен">⚙</button>
+          <span id="tokenStatus">Вход выполнен</span>
+          <button id="logoutButton" class="icon-button" title="Выйти">↪</button>
         </div>
       </header>
 
@@ -30,36 +40,18 @@
               <option value="watched">Просмотрено</option>
               <option value="favorite">Любимое</option>
             </select>
-            <button id="addButton">Добавить</button>
           </div>
           <div id="movies" class="movie-grid" aria-live="polite"></div>
         </section>
 
         <aside class="details" id="details">
           <div class="empty-state">
-            <span>Выбери фильм</span>
-            <p>Здесь появятся плеер, заметки, рейтинг и комментарии.</p>
+            <span>Найди фильм</span>
+            <p>Клик по обложке подгрузит плееры.</p>
           </div>
         </aside>
       </main>
     </div>
-
-    <dialog id="movieDialog">
-      <form id="movieForm" method="dialog">
-        <h2>Новый фильм</h2>
-        <label>Название<input name="title" required /></label>
-        <label>Год<input name="year" type="number" min="1888" max="2100" /></label>
-        <label>Жанр<input name="genre" /></label>
-        <label>Постер URL<input name="poster_url" type="url" /></label>
-        <label>Плеер URL<input name="player_url" placeholder="https://www.youtube.com/embed/..." /></label>
-        <label>Легальный источник<input name="source_url" type="url" /></label>
-        <label>Описание<textarea name="description" rows="4"></textarea></label>
-        <div class="dialog-actions">
-          <button type="button" id="cancelMovie">Отмена</button>
-          <button type="submit">Сохранить</button>
-        </div>
-      </form>
-    </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script src="/assets/app.js" type="module"></script>

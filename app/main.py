@@ -72,6 +72,7 @@ class MovieIn(BaseModel):
     player_url: str = Field(default="", max_length=1000)
     source_url: str = Field(default="", max_length=1000)
     genre: str = Field(default="", max_length=120)
+    list_status: str = Field(default="none", pattern="^(planned|watching|watched|favorite|none)$")
 
 
 class ListUpdate(BaseModel):
@@ -165,45 +166,13 @@ def init_db() -> None:
               AND source_url LIKE 'https://www.kinopoisk.ru/film/%'
             """
         )
-        count = conn.execute("SELECT COUNT(*) AS total FROM movies").fetchone()["total"]
-        if count == 0:
-            seed_movies(conn)
+        # No demo rows: this is a personal library, so an empty list should stay empty.
 
 
 def ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
     columns = [row["name"] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()]
     if column not in columns:
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
-
-
-def seed_movies(conn: sqlite3.Connection) -> None:
-    examples = [
-        (
-            "Big Buck Bunny",
-            2008,
-            "Открытый короткометражный фильм Blender Foundation. Удобный легальный пример для проверки плеера.",
-            "https://peach.blender.org/wp-content/uploads/title_anouncement.jpg",
-            "https://www.youtube.com/embed/aqz-KE-bpKQ",
-            "https://peach.blender.org/",
-            "Animation",
-        ),
-        (
-            "Sintel",
-            2010,
-            "Открытый анимационный фильм Blender Foundation, опубликованный как свободный проект.",
-            "https://download.blender.org/durian/poster/sintel_poster.jpg",
-            "https://www.youtube.com/embed/eRsGyueVLvQ",
-            "https://durian.blender.org/",
-            "Fantasy",
-        ),
-    ]
-    conn.executemany(
-        """
-        INSERT INTO movies(title, year, description, poster_url, player_url, source_url, genre)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        examples,
-    )
 
 
 def kinopoisk_request(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -501,6 +470,11 @@ def health() -> dict[str, Any]:
     }
 
 
+@app.get("/api/auth/check", dependencies=[Depends(require_admin)])
+def check_auth() -> dict[str, Any]:
+    return {"ok": True}
+
+
 @app.get("/api/movies")
 def list_movies(query: str = "", status: str = "all") -> list[dict[str, Any]]:
     filters = []
@@ -595,10 +569,27 @@ def import_kinopoisk_movie(kp_id: int) -> dict[str, Any]:
 @app.post("/api/movies", dependencies=[Depends(require_admin)])
 def create_movie(payload: MovieIn) -> dict[str, Any]:
     with db() as conn:
+        if payload.kinopoisk_id:
+            existing = conn.execute(
+                "SELECT * FROM movies WHERE kinopoisk_id = ?",
+                (payload.kinopoisk_id,),
+            ).fetchone()
+            if existing:
+                conn.execute(
+                    """
+                    UPDATE movies
+                    SET player_url = ?, list_status = ?
+                    WHERE id = ?
+                    """,
+                    (payload.player_url, payload.list_status, existing["id"]),
+                )
+                row = conn.execute("SELECT * FROM movies WHERE id = ?", (existing["id"],)).fetchone()
+                return dict_from_row(row)
+
         cursor = conn.execute(
             """
-            INSERT INTO movies(kinopoisk_id, title, original_title, year, description, poster_url, player_url, source_url, genre)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO movies(kinopoisk_id, title, original_title, year, description, poster_url, player_url, source_url, genre, list_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 payload.kinopoisk_id,
@@ -610,6 +601,7 @@ def create_movie(payload: MovieIn) -> dict[str, Any]:
                 payload.player_url,
                 payload.source_url,
                 payload.genre,
+                payload.list_status,
             ),
         )
         movie_id = cursor.lastrowid
@@ -709,6 +701,15 @@ def update_player(movie_id: int, payload: PlayerUpdate) -> dict[str, Any]:
         if result.rowcount == 0:
             raise HTTPException(status_code=404, detail="Movie not found")
         return {"ok": True, "player_url": payload.player_url}
+
+
+@app.delete("/api/movies/{movie_id}", dependencies=[Depends(require_admin)])
+def delete_movie(movie_id: int) -> dict[str, Any]:
+    with db() as conn:
+        result = conn.execute("DELETE FROM movies WHERE id = ?", (movie_id,))
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Movie not found")
+        return {"ok": True}
 
 
 @app.post("/api/movies/{movie_id}/comments", dependencies=[Depends(require_admin)])

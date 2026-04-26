@@ -99,7 +99,7 @@ h1 {
 
 .toolbar {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) 150px auto;
+  grid-template-columns: minmax(180px, 1fr) 150px;
   gap: 10px;
   margin-bottom: 18px;
 }
@@ -127,6 +127,27 @@ button {
   color: #11140f;
   background: var(--accent);
   font-weight: 800;
+}
+
+.app-hidden {
+  display: none !important;
+}
+
+.lock-screen {
+  min-height: 100svh;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+}
+
+.login-panel {
+  width: min(460px, 100%);
+  display: grid;
+  gap: 14px;
+}
+
+.login-panel h1 {
+  margin-bottom: 8px;
 }
 
 .icon-button {
@@ -242,21 +263,19 @@ button {
   color: var(--accent-2);
 }
 
-.player-tools {
+.primary-actions {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 14px;
-  margin: 22px 0 12px;
-  padding-top: 18px;
-  border-top: 1px solid var(--line);
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 22px;
 }
 
-.player-tools h3 {
-  margin-bottom: 4px;
+.danger-button {
+  background: #402427;
+  color: #ffd7d7;
+  border: 1px solid #7f3a42;
 }
 
-.player-tools p,
 .muted {
   color: var(--muted);
   margin-bottom: 0;
@@ -273,26 +292,6 @@ button {
   display: grid;
   gap: 8px;
   color: var(--muted);
-}
-
-.comments {
-  margin-top: 28px;
-  padding-top: 20px;
-  border-top: 1px solid var(--line);
-}
-
-.comments form {
-  display: grid;
-  gap: 10px;
-}
-
-.comment-list article {
-  padding: 14px 0;
-  border-bottom: 1px solid var(--line);
-}
-
-.comment-list p {
-  margin-bottom: 0;
 }
 
 .empty-state {
@@ -386,7 +385,4 @@ dialog form {
     grid-template-columns: 1fr;
   }
 
-  .player-tools {
-    display: grid;
-  }
 }
