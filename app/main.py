@@ -23,6 +23,8 @@ KINOPOISK_API_BASE = "https://kinopoiskapiunofficial.tech"
 KINOBOX_API_URL = os.getenv("KINOBOX_API_URL", "https://api.kinobox.tv").rstrip("/")
 KINOBOX_REFERER = os.getenv("KINOBOX_REFERER", "https://tapeop.dev/")
 KINOBOX_ORIGIN = os.getenv("KINOBOX_ORIGIN", "https://tapeop.dev")
+KODIK_TOKEN = os.getenv("KODIK_TOKEN", "")
+KODIK_API_URL = os.getenv("KODIK_API_URL", "https://kodikapi.com").rstrip("/")
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "static"
 
@@ -292,6 +294,78 @@ def normalize_kinobox_players(providers: list[dict[str, Any]]) -> list[dict[str,
     return players
 
 
+def normalize_kodik_players(results: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    players: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for index, item in enumerate(results, start=1):
+        iframe = str(item.get("link") or "").strip()
+        if not iframe:
+            continue
+        if iframe.startswith("//"):
+            iframe = f"https:{iframe}"
+        elif not iframe.startswith(("http://", "https://")):
+            iframe = f"https://{iframe.lstrip('/')}"
+
+        if iframe in seen:
+            continue
+        seen.add(iframe)
+
+        translation = item.get("translation") if isinstance(item.get("translation"), dict) else {}
+        title = str(translation.get("title") or item.get("title") or f"Kodik {index}").strip()
+        players.append(
+            {
+                "name": f"Kodik / {title}",
+                "translate": title,
+                "iframe": iframe,
+                "quality": str(item.get("quality") or ""),
+                "source": "kodik",
+            }
+        )
+
+    return players
+
+
+def get_kinobox_players(kp_id: str, title: str) -> list[dict[str, Any]]:
+    payload = external_json_request(
+        f"{KINOBOX_API_URL}/api/players",
+        params={"kinopoisk": kp_id, "title": title},
+        headers={
+            "Accept": "application/json",
+            "Referer": KINOBOX_REFERER,
+            "Origin": KINOBOX_ORIGIN,
+        },
+    )
+    providers = payload.get("data") if isinstance(payload, dict) else []
+    return normalize_kinobox_players(providers if isinstance(providers, list) else [])
+
+
+def get_kodik_players(kp_id: str) -> list[dict[str, Any]]:
+    if not KODIK_TOKEN:
+        return []
+
+    payload = external_json_request(
+        f"{KODIK_API_URL}/search",
+        params={"token": KODIK_TOKEN, "kinopoisk_id": kp_id},
+        headers={"Accept": "application/json"},
+    )
+    results = payload.get("results") if isinstance(payload, dict) else []
+    return normalize_kodik_players(results if isinstance(results, list) else [])
+
+
+def merge_players(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    players: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for group in groups:
+        for player in group:
+            iframe = str(player.get("iframe") or "").strip()
+            if not iframe or iframe in seen:
+                continue
+            seen.add(iframe)
+            players.append(player)
+    return players
+
+
 app = FastAPI(title=APP_NAME)
 app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")
 
@@ -308,6 +382,7 @@ def health() -> dict[str, Any]:
         "app": APP_NAME,
         "kinopoisk": bool(KINOPOISK_API_KEY),
         "kinobox": bool(KINOBOX_API_URL),
+        "kodik": bool(KODIK_TOKEN),
     }
 
 
@@ -457,17 +532,20 @@ def get_movie_players(movie_id: int) -> list[dict[str, Any]]:
     if not kp_id:
         return []
 
-    payload = external_json_request(
-        f"{KINOBOX_API_URL}/api/players",
-        params={"kinopoisk": kp_id, "title": row["title"]},
-        headers={
-            "Accept": "application/json",
-            "Referer": KINOBOX_REFERER,
-            "Origin": KINOBOX_ORIGIN,
-        },
-    )
-    providers = payload.get("data") if isinstance(payload, dict) else []
-    return normalize_kinobox_players(providers if isinstance(providers, list) else [])
+    kinobox_players: list[dict[str, Any]] = []
+    kodik_players: list[dict[str, Any]] = []
+
+    try:
+        kinobox_players = get_kinobox_players(kp_id, str(row["title"] or ""))
+    except Exception:
+        kinobox_players = []
+
+    try:
+        kodik_players = get_kodik_players(kp_id)
+    except Exception:
+        kodik_players = []
+
+    return merge_players(kinobox_players, kodik_players)
 
 
 @app.put("/api/movies/{movie_id}/player", dependencies=[Depends(require_admin)])
