@@ -12,6 +12,8 @@ const movieDialog = document.querySelector('#movieDialog')
 const movieForm = document.querySelector('#movieForm')
 const tokenStatus = document.querySelector('#tokenStatus')
 const toast = document.querySelector('#toast')
+const internetSearchButton = document.querySelector('#internetSearchButton')
+const internetResults = document.querySelector('#internetResults')
 
 const statusLabels = {
   none: 'Без списка',
@@ -103,6 +105,38 @@ function renderMovies() {
       `
     })
     .join('')
+}
+
+function renderInternetResults(results) {
+  if (!results.length) {
+    internetResults.hidden = false
+    internetResults.innerHTML = '<p>В Кинопоиске ничего не найдено.</p>'
+    return
+  }
+
+  internetResults.hidden = false
+  internetResults.innerHTML = `
+    <div class="internet-results-head">
+      <strong>Найдено в Кинопоиске</strong>
+      <button id="closeInternetResults" type="button">Скрыть</button>
+    </div>
+    <div class="internet-list">
+      ${results
+        .map(
+          (movie) => `
+            <article>
+              <img src="${escapeHtml(movie.poster_url || '/assets/poster-placeholder.svg')}" alt="" />
+              <div>
+                <strong>${escapeHtml(movie.title)}</strong>
+                <small>${escapeHtml(movie.year || 'Без года')} ${movie.genre ? `· ${escapeHtml(movie.genre)}` : ''}</small>
+              </div>
+              <button class="import-kinopoisk" data-kp-id="${escapeHtml(movie.kp_id)}" type="button">Импорт</button>
+            </article>
+          `
+        )
+        .join('')}
+    </div>
+  `
 }
 
 async function renderDetails() {
@@ -216,6 +250,51 @@ moviesEl.addEventListener('click', (event) => {
 
 searchInput.addEventListener('input', () => loadMovies())
 statusFilter.addEventListener('change', () => loadMovies())
+
+internetSearchButton.addEventListener('click', async () => {
+  const query = searchInput.value.trim()
+  if (!query) {
+    showToast('Введите название для поиска', 'error')
+    return
+  }
+
+  try {
+    internetSearchButton.disabled = true
+    internetSearchButton.textContent = 'Ищу...'
+    const results = await api(`/api/search/kinopoisk?query=${encodeURIComponent(query)}`)
+    renderInternetResults(results)
+  } catch (error) {
+    const message = String(error.message || '')
+    if (message.includes('KINOPOISK_API_KEY')) {
+      showToast('На сервере не задан KINOPOISK_API_KEY', 'error')
+      return
+    }
+    showToast('Кинопоиск сейчас не ответил', 'error')
+    console.error(error)
+  } finally {
+    internetSearchButton.disabled = false
+    internetSearchButton.textContent = 'Кинопоиск'
+  }
+})
+
+internetResults.addEventListener('click', async (event) => {
+  if (event.target.id === 'closeInternetResults') {
+    internetResults.hidden = true
+    internetResults.innerHTML = ''
+    return
+  }
+
+  const button = event.target.closest('.import-kinopoisk')
+  if (!button) return
+
+  await runAdminAction(async () => {
+    const movie = await api(`/api/import/kinopoisk/${button.dataset.kpId}`, { method: 'POST' })
+    state.selectedId = movie.id
+    await loadMovies()
+    internetResults.hidden = true
+    internetResults.innerHTML = ''
+  }, 'Фильм импортирован')
+})
 
 document.querySelector('#tokenButton').addEventListener('click', () => {
   const token = prompt('ADMIN_TOKEN из .env', state.token)

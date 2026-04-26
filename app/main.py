@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import urllib.error
+import urllib.parse
+import urllib.request
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Annotated, Any
@@ -9,12 +12,14 @@ from typing import Annotated, Any
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, HttpUrl
+from pydantic import BaseModel, Field
 
 
 APP_NAME = os.getenv("APP_NAME", "FirstTest Cinema")
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 DATABASE_PATH = Path(os.getenv("DATABASE_PATH", "/data/app.db"))
+KINOPOISK_API_KEY = os.getenv("KINOPOISK_API_KEY") or os.getenv("KINOPOISK_TECH_API_TOKEN", "")
+KINOPOISK_API_BASE = "https://kinopoiskapiunofficial.tech"
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "static"
 
@@ -142,6 +147,64 @@ def seed_movies(conn: sqlite3.Connection) -> None:
     )
 
 
+def kinopoisk_request(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    if not KINOPOISK_API_KEY:
+        raise HTTPException(status_code=503, detail="KINOPOISK_API_KEY is not configured")
+
+    query = urllib.parse.urlencode({key: value for key, value in (params or {}).items() if value})
+    url = f"{KINOPOISK_API_BASE}{path}"
+    if query:
+        url = f"{url}?{query}"
+
+    request = urllib.request.Request(
+        url,
+        headers={
+            "Accept": "application/json",
+            "X-API-KEY": KINOPOISK_API_KEY,
+        },
+        method="GET",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=12) as response:
+            import json
+
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:500]
+        raise HTTPException(status_code=exc.code, detail=detail or "Kinopoisk API error") from exc
+    except urllib.error.URLError as exc:
+        raise HTTPException(status_code=502, detail=f"Kinopoisk API is unavailable: {exc.reason}") from exc
+
+
+def normalize_kinopoisk_search_item(item: dict[str, Any]) -> dict[str, Any]:
+    kp_id = item.get("filmId") or item.get("kinopoiskId")
+    title = item.get("nameRu") or item.get("nameEn") or item.get("nameOriginal") or "Без названия"
+    return {
+        "kp_id": str(kp_id or ""),
+        "title": title,
+        "original_title": item.get("nameEn") or item.get("nameOriginal") or "",
+        "year": item.get("year"),
+        "genre": ", ".join(genre.get("genre", "") for genre in item.get("genres", []) if genre.get("genre")),
+        "poster_url": item.get("posterUrlPreview") or item.get("posterUrl") or "",
+        "description": item.get("description") or "",
+    }
+
+
+def normalize_kinopoisk_film(payload: dict[str, Any]) -> dict[str, Any]:
+    kp_id = payload.get("kinopoiskId") or payload.get("filmId")
+    return {
+        "title": payload.get("nameRu") or payload.get("nameEn") or payload.get("nameOriginal") or "Без названия",
+        "original_title": payload.get("nameEn") or payload.get("nameOriginal") or "",
+        "year": payload.get("year"),
+        "description": payload.get("description") or payload.get("shortDescription") or "",
+        "poster_url": payload.get("posterUrl") or payload.get("posterUrlPreview") or "",
+        "player_url": "",
+        "source_url": f"https://www.kinopoisk.ru/film/{kp_id}/" if kp_id else "",
+        "genre": ", ".join(genre.get("genre", "") for genre in payload.get("genres", []) if genre.get("genre")),
+    }
+
+
 app = FastAPI(title=APP_NAME)
 app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")
 
@@ -153,7 +216,7 @@ def on_startup() -> None:
 
 @app.get("/api/health")
 def health() -> dict[str, Any]:
-    return {"ok": True, "app": APP_NAME}
+    return {"ok": True, "app": APP_NAME, "kinopoisk": bool(KINOPOISK_API_KEY)}
 
 
 @app.get("/api/movies")
@@ -181,6 +244,43 @@ def list_movies(query: str = "", status: str = "all") -> list[dict[str, Any]]:
             params,
         ).fetchall()
         return [dict_from_row(row) for row in rows]
+
+
+@app.get("/api/search/kinopoisk")
+def search_kinopoisk(query: str) -> list[dict[str, Any]]:
+    if not query.strip():
+        return []
+    payload = kinopoisk_request("/api/v2.1/films/search-by-keyword", {"keyword": query.strip(), "page": 1})
+    films = payload.get("films") or []
+    return [normalize_kinopoisk_search_item(item) for item in films if item.get("filmId") or item.get("kinopoiskId")]
+
+
+@app.post("/api/import/kinopoisk/{kp_id}", dependencies=[Depends(require_admin)])
+def import_kinopoisk_movie(kp_id: int) -> dict[str, Any]:
+    payload = kinopoisk_request(f"/api/v2.2/films/{kp_id}")
+    movie = normalize_kinopoisk_film(payload)
+    with db() as conn:
+        existing = conn.execute("SELECT * FROM movies WHERE source_url = ?", (movie["source_url"],)).fetchone()
+        if existing:
+            return dict_from_row(existing)
+        cursor = conn.execute(
+            """
+            INSERT INTO movies(title, original_title, year, description, poster_url, player_url, source_url, genre)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                movie["title"],
+                movie["original_title"],
+                movie["year"],
+                movie["description"],
+                movie["poster_url"],
+                movie["player_url"],
+                movie["source_url"],
+                movie["genre"],
+            ),
+        )
+        row = conn.execute("SELECT * FROM movies WHERE id = ?", (cursor.lastrowid,)).fetchone()
+        return dict_from_row(row)
 
 
 @app.post("/api/movies", dependencies=[Depends(require_admin)])
