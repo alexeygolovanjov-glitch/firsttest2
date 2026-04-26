@@ -4,7 +4,7 @@ services:
     container_name: firsttest-cinema
     restart: unless-stopped
     environment:
-      APP_NAME: ${APP_NAME:-FirstTest Cinema}
+      APP_NAME: ${APP_NAME:-Личный кинотеатр}
       ADMIN_TOKEN: ${ADMIN_TOKEN:-change-this-token}
       DATABASE_PATH: ${DATABASE_PATH:-/data/app.db}
       KINOPOISK_API_KEY: ${KINOPOISK_API_KEY:-}

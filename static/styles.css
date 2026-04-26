@@ -1,13 +1,13 @@
 :root {
   color-scheme: dark;
-  --bg: #101312;
-  --panel: #171b19;
-  --panel-2: #202520;
-  --text: #f4f0e8;
-  --muted: #a9b0a7;
-  --line: #30372f;
-  --accent: #d5ff68;
-  --accent-2: #78dcca;
+  --bg: #0f0b18;
+  --panel: #181126;
+  --panel-2: #211634;
+  --text: #f7f1ff;
+  --muted: #b9abc9;
+  --line: #35264a;
+  --accent: #b982ff;
+  --accent-2: #d9b7ff;
 }
 
 * {
@@ -18,8 +18,8 @@ body {
   margin: 0;
   min-height: 100svh;
   background:
-    linear-gradient(120deg, rgba(213, 255, 104, 0.12), transparent 36%),
-    radial-gradient(circle at 90% 10%, rgba(120, 220, 202, 0.15), transparent 28%),
+    linear-gradient(120deg, rgba(185, 130, 255, 0.16), transparent 38%),
+    radial-gradient(circle at 90% 10%, rgba(105, 70, 180, 0.22), transparent 30%),
     var(--bg);
   color: var(--text);
   font-family:
@@ -44,7 +44,7 @@ button {
 }
 
 .topbar {
-  min-height: 84px;
+  min-height: 62px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -124,7 +124,7 @@ button {
   border: 0;
   border-radius: 8px;
   padding: 12px 15px;
-  color: #11140f;
+  color: #130d1f;
   background: var(--accent);
   font-weight: 800;
 }
@@ -188,7 +188,7 @@ button {
   aspect-ratio: 2 / 3;
   object-fit: cover;
   display: block;
-  background: #262b28;
+  background: #241936;
 }
 
 .movie-tile span,
@@ -220,12 +220,12 @@ button {
 }
 
 .player {
-  background: #050605;
+  background: #0b0712;
 }
 
 .player-select-row {
   padding: 12px;
-  background: #050605;
+  background: #0b0712;
   border-bottom: 1px solid var(--line);
 }
 

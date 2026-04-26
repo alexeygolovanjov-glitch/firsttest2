@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="400" height="600" viewBox="0 0 400 600" role="img" aria-label="No poster">
-  <rect width="400" height="600" fill="#202520"/>
-  <circle cx="200" cy="250" r="82" fill="#30372f"/>
-  <path d="M152 246l82-48v96z" fill="#d5ff68"/>
-  <text x="200" y="380" fill="#a9b0a7" font-family="Arial, sans-serif" font-size="28" text-anchor="middle">NO POSTER</text>
+  <rect width="400" height="600" fill="#181126"/>
+  <circle cx="200" cy="250" r="82" fill="#35264a"/>
+  <path d="M152 246l82-48v96z" fill="#b982ff"/>
+  <text x="200" y="380" fill="#b9abc9" font-family="Arial, sans-serif" font-size="28" text-anchor="middle">NO POSTER</text>
 </svg>

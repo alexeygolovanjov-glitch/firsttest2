@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 
-APP_NAME = os.getenv("APP_NAME", "FirstTest Cinema")
+APP_NAME = os.getenv("APP_NAME", "Личный кинотеатр")
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 DATABASE_PATH = Path(os.getenv("DATABASE_PATH", "/data/app.db"))
 KINOPOISK_API_KEY = os.getenv("KINOPOISK_API_KEY") or os.getenv("KINOPOISK_TECH_API_TOKEN", "")

@@ -4,6 +4,7 @@ const state = {
   selected: null,
   selectedPlayer: null,
   loadingPlayersFor: null,
+  loadingLibraryPlayersFor: null,
   token: localStorage.getItem('adminToken') || '',
   searchTimer: null
 }
@@ -111,6 +112,12 @@ function preferTurbo(players) {
   )
 }
 
+function mergeSavedPlayer(savedPlayer, players) {
+  if (!savedPlayer?.iframe) return players
+  const withoutDuplicate = players.filter((player) => player.iframe !== savedPlayer.iframe)
+  return [savedPlayer, ...withoutDuplicate]
+}
+
 async function loadLibrary() {
   const params = new URLSearchParams()
   params.set('status', statusFilter.value)
@@ -169,12 +176,14 @@ function renderMovies() {
 
 async function selectLibraryMovie(id) {
   const movie = await api(`/api/movies/${id}`)
-  state.selected = { mode: 'library', id, movie }
-  state.selectedPlayer = movie.player_url
+  const savedPlayer = movie.player_url
     ? { name: 'Сохранённый плеер', iframe: movie.player_url, source: 'saved' }
     : null
+  state.selected = { mode: 'library', id, movie }
+  state.selectedPlayer = savedPlayer
   renderMovies()
   renderDetails()
+  if (movie.kinopoisk_id) loadPlayersForLibraryMovie(movie.id, movie.kinopoisk_id, savedPlayer)
 }
 
 function selectSearchMovie(kpId) {
@@ -188,7 +197,10 @@ function selectSearchMovie(kpId) {
 }
 
 function playerMarkup() {
-  if (state.loadingPlayersFor && state.selected?.mode === 'search') {
+  if (
+    (state.loadingPlayersFor && state.selected?.mode === 'search') ||
+    (state.loadingLibraryPlayersFor && state.selected?.mode === 'library' && !state.selectedPlayer)
+  ) {
     return '<div class="no-player">Ищу плееры...</div>'
   }
   if (!state.selectedPlayer?.iframe) return '<div class="no-player">Плеер не найден</div>'
@@ -221,14 +233,41 @@ async function loadPlayersForSearchMovie(kpId) {
   }
 }
 
+async function loadPlayersForLibraryMovie(movieId, kpId, savedPlayer) {
+  state.loadingLibraryPlayersFor = String(movieId)
+  renderDetails()
+  try {
+    const payload = await api(`/api/players/${encodeURIComponent(kpId)}`)
+    const players = mergeSavedPlayer(savedPlayer, payload.players || [])
+    const stillSelected = state.selected?.mode === 'library' && String(state.selected.id) === String(movieId)
+    if (!stillSelected) return
+    state.selected.movie.players = players
+    state.selected.movie.player_message = payload.message || ''
+    state.selectedPlayer = savedPlayer || preferTurbo(players)
+  } catch (error) {
+    if (state.selected?.mode === 'library' && String(state.selected.id) === String(movieId)) {
+      state.selected.movie.player_message = 'Не удалось обновить список плееров'
+    }
+    console.error(error)
+  } finally {
+    if (String(state.loadingLibraryPlayersFor) === String(movieId)) state.loadingLibraryPlayersFor = null
+    renderDetails()
+  }
+}
+
 function selectedPlayers() {
   if (state.selected?.mode === 'search') return state.selected.movie.players || []
-  return state.selectedPlayer ? [state.selectedPlayer] : []
+  if (state.selected?.mode === 'library') {
+    return state.selected.movie.players || (state.selectedPlayer ? [state.selectedPlayer] : [])
+  }
+  return []
 }
 
 function playerSelect(movie) {
   const players = selectedPlayers()
-  if (state.loadingPlayersFor && state.selected?.mode === 'search') {
+  if (
+    state.loadingPlayersFor && state.selected?.mode === 'search'
+  ) {
     return '<div class="player-select-row"><span class="muted">Ищу плееры KinoBD...</span></div>'
   }
   if (!players.length) {
@@ -307,6 +346,15 @@ function bindDetailActions() {
   document.querySelector('#playerSelect')?.addEventListener('change', (event) => {
     const players = selectedPlayers()
     state.selectedPlayer = players[Number(event.target.value)] || null
+    if (state.selected?.mode === 'library' && state.selectedPlayer?.iframe) {
+      const movieId = state.selected.id
+      runAdminAction(async () => {
+        await api(`/api/movies/${movieId}/player`, {
+          method: 'PUT',
+          body: JSON.stringify({ player_url: state.selectedPlayer.iframe })
+        })
+      }, 'Плеер сохранён')
+    }
     renderDetails()
   })
 
