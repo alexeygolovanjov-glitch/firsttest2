@@ -3,6 +3,7 @@ const state = {
   searchResults: [],
   selected: null,
   selectedPlayer: null,
+  loadingPlayersFor: null,
   token: localStorage.getItem('adminToken') || '',
   searchTimer: null
 }
@@ -101,7 +102,7 @@ async function searchRemote(query) {
     return
   }
 
-  moviesEl.innerHTML = '<p class="muted">Ищу фильмы и плееры...</p>'
+  moviesEl.innerHTML = '<p class="muted">Ищу фильмы...</p>'
   try {
     state.searchResults = await api(`/api/search?query=${encodeURIComponent(query)}&limit=8`)
     renderMovies()
@@ -132,7 +133,7 @@ function renderMovies() {
       const active =
         state.selected?.mode === (isSearch ? 'search' : 'library') && String(state.selected.id) === String(id)
       const playerInfo = isSearch
-        ? `${movie.player_count || 0} плееров`
+        ? 'Кинопоиск'
         : statusLabels[movie.list_status] || 'Без списка'
       return `
         <button class="movie-tile ${active ? 'active' : ''}" data-id="${escapeHtml(id)}" data-mode="${isSearch ? 'search' : 'library'}">
@@ -159,35 +160,68 @@ function selectSearchMovie(kpId) {
   const movie = state.searchResults.find((item) => String(item.kp_id) === String(kpId))
   if (!movie) return
   state.selected = { mode: 'search', id: kpId, movie }
-  state.selectedPlayer = movie.players?.[0] || null
+  state.selectedPlayer = null
   renderMovies()
   renderDetails()
+  loadPlayersForSearchMovie(kpId)
 }
 
 function playerMarkup() {
+  if (state.loadingPlayersFor && state.selected?.mode === 'search') {
+    return '<div class="no-player">Ищу плееры...</div>'
+  }
   if (!state.selectedPlayer?.iframe) return '<div class="no-player">Плеер не найден</div>'
   return `<iframe src="${escapeHtml(state.selectedPlayer.iframe)}" title="Плеер" allowfullscreen></iframe>`
 }
 
-function playersList(movie) {
-  const players = state.selected?.mode === 'search' ? movie.players || [] : state.selectedPlayer ? [state.selectedPlayer] : []
-  if (!players.length) return '<p class="muted">Для этого фильма KinoBD не вернул плееры.</p>'
+async function loadPlayersForSearchMovie(kpId) {
+  state.loadingPlayersFor = String(kpId)
+  renderDetails()
+  try {
+    const payload = await api(`/api/players/${encodeURIComponent(kpId)}`)
+    const players = payload.players || []
+    const stillSelected = state.selected?.mode === 'search' && String(state.selected.id) === String(kpId)
+    const movie = state.searchResults.find((item) => String(item.kp_id) === String(kpId))
+    if (!movie) return
+    movie.players = players
+    movie.player_message = payload.message || ''
+    if (stillSelected) {
+      state.selected.movie = movie
+      state.selectedPlayer = players[0] || null
+    }
+  } catch (error) {
+    const movie = state.searchResults.find((item) => String(item.kp_id) === String(kpId))
+    if (movie) movie.player_message = 'Не удалось получить плееры'
+    console.error(error)
+  } finally {
+    if (String(state.loadingPlayersFor) === String(kpId)) state.loadingPlayersFor = null
+    renderMovies()
+    renderDetails()
+  }
+}
+
+function playerSelect(movie) {
+  const players = selectedPlayers()
+  if (state.loadingPlayersFor && state.selected?.mode === 'search') {
+    return '<div class="player-select-row"><span class="muted">Ищу плееры KinoBD...</span></div>'
+  }
+  if (!players.length) {
+    return `<div class="player-select-row"><span class="muted">${escapeHtml(movie.player_message || 'Плееры не найдены.')}</span></div>`
+  }
 
   return `
-    <div class="player-choices compact">
-      ${players
-        .map(
-          (player, index) => `
-            <article class="${state.selectedPlayer?.iframe === player.iframe ? 'active' : ''}">
-              <div>
-                <strong>${escapeHtml(player.name || player.translate || `Плеер ${index + 1}`)}</strong>
-                <small>${escapeHtml([player.source, player.quality].filter(Boolean).join(' · '))}</small>
-              </div>
-              <button class="select-player" data-index="${index}" type="button">Открыть</button>
-            </article>
-          `
-        )
-        .join('')}
+    <div class="player-select-row">
+      <select id="playerSelect" aria-label="Выбор плеера">
+        ${players
+          .map(
+            (player, index) => `
+              <option value="${index}" ${state.selectedPlayer?.iframe === player.iframe ? 'selected' : ''}>
+                ${escapeHtml(player.name || player.translate || `Плеер ${index + 1}`)}
+              </option>
+            `
+          )
+          .join('')}
+      </select>
     </div>
   `
 }
@@ -207,6 +241,7 @@ function renderDetails() {
   const canSave = state.selected.mode === 'search'
 
   detailsEl.innerHTML = `
+    ${playerSelect(movie)}
     <div class="player">${playerMarkup()}</div>
     <div class="detail-body">
       <p class="eyebrow">${escapeHtml(movie.genre || 'Фильм')}</p>
@@ -217,12 +252,11 @@ function renderDetails() {
 
       <section class="player-tools">
         <div>
-          <h3>Плееры</h3>
-          <p>${escapeHtml((state.selected.mode === 'search' ? movie.player_count : state.selectedPlayer ? 1 : 0) || 0)} найдено</p>
+          <h3>${escapeHtml(state.selected.mode === 'search' ? 'Результат поиска' : 'В библиотеке')}</h3>
+          <p>${escapeHtml(movie.kinopoisk_id || movie.kp_id || '')}</p>
         </div>
         ${canSave ? '<button id="saveSearchMovie" type="button">Сохранить</button>' : ''}
       </section>
-      ${playersList(movie)}
 
       ${
         state.selected.mode === 'library'
@@ -253,12 +287,10 @@ function selectedPlayers() {
 }
 
 function bindDetailActions() {
-  document.querySelectorAll('.select-player').forEach((button) => {
-    button.addEventListener('click', () => {
-      const players = selectedPlayers()
-      state.selectedPlayer = players[Number(button.dataset.index)] || null
-      renderDetails()
-    })
+  document.querySelector('#playerSelect')?.addEventListener('change', (event) => {
+    const players = selectedPlayers()
+    state.selectedPlayer = players[Number(event.target.value)] || null
+    renderDetails()
   })
 
   document.querySelector('#saveSearchMovie')?.addEventListener('click', async () => {

@@ -538,30 +538,29 @@ def search_kinopoisk(query: str) -> list[dict[str, Any]]:
 
 
 @app.get("/api/search")
-def search_with_players(query: str, limit: int = 8) -> list[dict[str, Any]]:
+def search_movies(query: str, limit: int = 8) -> list[dict[str, Any]]:
     if not query.strip():
         return []
     safe_limit = max(1, min(limit, 12))
     payload = kinopoisk_request("/api/v2.1/films/search-by-keyword", {"keyword": query.strip(), "page": 1})
     films = payload.get("films") or []
-    results: list[dict[str, Any]] = []
+    return [
+        normalize_kinopoisk_search_item(item)
+        for item in films[:safe_limit]
+        if item.get("filmId") or item.get("kinopoiskId")
+    ]
 
-    for item in films[:safe_limit]:
-        if not (item.get("filmId") or item.get("kinopoiskId")):
-            continue
-        movie = normalize_kinopoisk_search_item(item)
-        players: list[dict[str, Any]] = []
-        player_error = ""
-        try:
-            players = get_kinobd_players(movie["kp_id"])
-        except Exception as exc:
-            player_error = str(exc)[:220]
-        movie["players"] = players
-        movie["player_count"] = len(players)
-        movie["player_error"] = player_error
-        results.append(movie)
 
-    return results
+@app.get("/api/players/{kp_id}")
+def get_players_by_kp_id(kp_id: str) -> dict[str, Any]:
+    kp_id = "".join(char for char in str(kp_id) if char.isdigit())
+    if not kp_id:
+        return {"players": [], "message": "kinopoisk_id is missing"}
+    try:
+        players = get_kinobd_players(kp_id)
+        return {"players": players, "message": "" if players else "no players found"}
+    except Exception as exc:
+        return {"players": [], "message": str(exc)[:220]}
 
 
 @app.post("/api/import/kinopoisk/{kp_id}", dependencies=[Depends(require_admin)])

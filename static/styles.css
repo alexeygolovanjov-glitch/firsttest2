@@ -202,6 +202,17 @@ button {
   background: #050605;
 }
 
+.player-select-row {
+  padding: 12px;
+  background: #050605;
+  border-bottom: 1px solid var(--line);
+}
+
+.player-select-row select {
+  max-width: 100%;
+  background: rgba(255, 255, 255, 0.08);
+}
+
 .player iframe,
 .no-player {
   width: 100%;
@@ -249,64 +260,6 @@ button {
 .muted {
   color: var(--muted);
   margin-bottom: 0;
-}
-
-.player-choices {
-  display: grid;
-  gap: 8px;
-  margin-bottom: 20px;
-}
-
-.player-choices article {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.04);
-}
-
-.player-choices article.active {
-  border-color: var(--accent);
-}
-
-.provider-diagnostics {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-bottom: 10px;
-}
-
-.provider-diagnostics span {
-  display: inline-flex;
-  align-items: center;
-  min-height: 28px;
-  padding: 4px 9px;
-  border-radius: 8px;
-  border: 1px solid var(--line);
-  color: var(--muted);
-  font-size: 0.86rem;
-}
-
-.provider-diagnostics span.ok {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
-.provider-diagnostics span.warn {
-  border-color: #766f51;
-}
-
-.player-choices strong,
-.player-choices small {
-  display: block;
-}
-
-.player-choices small {
-  color: var(--muted);
-  margin-top: 3px;
 }
 
 .controls-row {
@@ -430,11 +383,6 @@ dialog form {
 
   .toolbar,
   .controls-row {
-    grid-template-columns: 1fr;
-  }
-
-  .player-tools,
-  .player-choices article {
     grid-template-columns: 1fr;
   }
 
