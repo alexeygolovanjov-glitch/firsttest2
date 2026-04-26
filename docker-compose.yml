@@ -13,6 +13,8 @@ services:
       KINOBOX_ORIGIN: ${KINOBOX_ORIGIN:-https://tapeop.dev}
       KODIK_TOKEN: ${KODIK_TOKEN:-}
       KODIK_API_URL: ${KODIK_API_URL:-https://kodikapi.com}
+      KINOBD_API_URL: ${KINOBD_API_URL:-https://kinobd.net}
+      KINOBD_TOKEN: ${KINOBD_TOKEN:-}
     ports:
       - "${PORT:-8000}:8000"
     volumes:

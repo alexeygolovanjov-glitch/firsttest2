@@ -25,6 +25,39 @@ KINOBOX_REFERER = os.getenv("KINOBOX_REFERER", "https://tapeop.dev/")
 KINOBOX_ORIGIN = os.getenv("KINOBOX_ORIGIN", "https://tapeop.dev")
 KODIK_TOKEN = os.getenv("KODIK_TOKEN", "")
 KODIK_API_URL = os.getenv("KODIK_API_URL", "https://kodikapi.com").rstrip("/")
+KINOBD_API_URL = os.getenv("KINOBD_API_URL", "https://kinobd.net").rstrip("/")
+KINOBD_TOKEN = os.getenv("KINOBD_TOKEN", "")
+KINOBD_PLAYER_PROVIDERS = ",".join(
+    [
+        "collaps",
+        "vibix",
+        "alloha",
+        "kodik",
+        "kinotochka",
+        "flixcdn",
+        "ashdi",
+        "turbo",
+        "videocdn",
+        "bazon",
+        "ustore",
+        "pleer",
+        "videospider",
+        "iframe",
+        "moonwalk",
+        "hdvb",
+        "cdnmovies",
+        "lookbase",
+        "kholobok",
+        "videoapi",
+        "voidboost",
+        "trailer_local",
+        "videoseed",
+        "ia",
+        "youtube",
+        "ext",
+        "trailer",
+    ]
+)
 BASE_DIR = Path(__file__).resolve().parent.parent
 STATIC_DIR = BASE_DIR / "static"
 
@@ -255,6 +288,64 @@ def external_json_request(
         raise HTTPException(status_code=502, detail=f"External API is unavailable: {exc.reason}") from exc
 
 
+def external_form_request(
+    url: str,
+    *,
+    params: dict[str, Any] | None = None,
+    data: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
+) -> Any:
+    query = urllib.parse.urlencode({key: value for key, value in (params or {}).items() if value})
+    if query:
+        url = f"{url}?{query}"
+
+    body = urllib.parse.urlencode({key: value for key, value in (data or {}).items() if value is not None}).encode()
+    request_headers = {"Content-Type": "application/x-www-form-urlencoded", **(headers or {})}
+    request = urllib.request.Request(url, data=body, headers=request_headers, method="POST")
+
+    try:
+        with urllib.request.urlopen(request, timeout=12) as response:
+            import json
+
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")[:500]
+        raise HTTPException(status_code=exc.code, detail=detail or "External API error") from exc
+    except urllib.error.URLError as exc:
+        raise HTTPException(status_code=502, detail=f"External API is unavailable: {exc.reason}") from exc
+
+
+def to_absolute_url(value: str, base_url: str) -> str:
+    value = str(value or "").strip()
+    if not value:
+        return ""
+    if value.startswith(("http://", "https://")):
+        return value
+    if value.startswith("//"):
+        return f"https:{value}"
+    return urllib.parse.urljoin(f"{base_url}/", value)
+
+
+def extract_iframe_url(value: Any, base_url: str) -> str:
+    raw = str(value or "").strip()
+    if not raw:
+        return ""
+    if raw.startswith(("http://", "https://", "//")):
+        return to_absolute_url(raw, base_url)
+
+    import re
+
+    data_src = re.search(r'data-src=["\']([^"\']+)["\']', raw, flags=re.IGNORECASE)
+    if data_src:
+        return to_absolute_url(data_src.group(1), base_url)
+
+    src = re.search(r'src=["\']([^"\']+)["\']', raw, flags=re.IGNORECASE)
+    if src:
+        return to_absolute_url(src.group(1), base_url)
+
+    return ""
+
+
 def normalize_kinobox_players(providers: list[dict[str, Any]]) -> list[dict[str, Any]]:
     players: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -290,6 +381,55 @@ def normalize_kinobox_players(providers: list[dict[str, Any]]) -> list[dict[str,
                     "source": "kinobox",
                 }
             )
+
+    return players
+
+
+def normalize_kinobd_provider_map(provider_map: dict[str, Any]) -> list[dict[str, Any]]:
+    players: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for provider, value in provider_map.items():
+        if not isinstance(value, dict):
+            continue
+        iframe = extract_iframe_url(value.get("iframe"), KINOBD_API_URL)
+        if not iframe or iframe in seen:
+            continue
+        seen.add(iframe)
+        label = str(provider or "KinoBD").upper()
+        translate = str(value.get("translate") or label).strip()
+        players.append(
+            {
+                "name": f"KinoBD / {label}",
+                "translate": translate,
+                "iframe": iframe,
+                "quality": str(value.get("quality") or ""),
+                "source": "kinobd",
+            }
+        )
+
+    return players
+
+
+def normalize_kinobd_candidates(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    players: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    for item in rows:
+        iframe = extract_iframe_url(item.get("iframe"), KINOBD_API_URL)
+        if not iframe or iframe in seen:
+            continue
+        seen.add(iframe)
+        name = item.get("name_russian") or item.get("name_original") or item.get("id") or "KinoBD"
+        players.append(
+            {
+                "name": f"KinoBD / {name}",
+                "translate": str(name),
+                "iframe": iframe,
+                "quality": str(item.get("year") or ""),
+                "source": "kinobd",
+            }
+        )
 
     return players
 
@@ -353,6 +493,65 @@ def get_kodik_players(kp_id: str) -> list[dict[str, Any]]:
     return normalize_kodik_players(results if isinstance(results, list) else [])
 
 
+def get_kinobd_players(kp_id: str) -> list[dict[str, Any]]:
+    params: dict[str, Any] = {
+        "q": kp_id,
+        "type": "kp_id",
+        "page": 1,
+    }
+    if KINOBD_TOKEN:
+        params["token"] = KINOBD_TOKEN
+
+    search_payload = external_json_request(f"{KINOBD_API_URL}/api/player/search", params=params)
+    rows = search_payload.get("data") if isinstance(search_payload, dict) else []
+    candidates = rows if isinstance(rows, list) else []
+    if not candidates:
+        return []
+
+    selected = candidates[0]
+    inid = selected.get("id")
+    if not inid:
+        return normalize_kinobd_candidates(candidates)
+
+    player_url = extract_iframe_url(selected.get("iframe"), KINOBD_API_URL)
+    headers = {}
+    if player_url:
+        headers["X-Re"] = player_url
+        try:
+            origin = urllib.parse.urlparse(player_url).scheme + "://" + urllib.parse.urlparse(player_url).netloc
+            headers["Origin"] = origin
+            headers["Referer"] = f"{origin}/"
+        except Exception:
+            pass
+
+    data = {
+        "fast": "1",
+        "inid": str(inid),
+        "player": KINOBD_PLAYER_PROVIDERS,
+    }
+    if KINOBD_TOKEN:
+        data["token"] = KINOBD_TOKEN
+
+    try:
+        playerdata_url = f"{KINOBD_API_URL}/playerdata?cache{urllib.parse.quote(str(inid))}"
+        if KINOBD_TOKEN:
+            playerdata_url = f"{playerdata_url}&token={urllib.parse.quote(KINOBD_TOKEN)}"
+        player_payload = external_form_request(
+            playerdata_url,
+            data=data,
+            headers=headers,
+        )
+    except Exception:
+        return normalize_kinobd_candidates(candidates)
+
+    if isinstance(player_payload, dict):
+        players = normalize_kinobd_provider_map(player_payload)
+        if players:
+            return players
+
+    return normalize_kinobd_candidates(candidates)
+
+
 def merge_players(*groups: list[dict[str, Any]]) -> list[dict[str, Any]]:
     players: list[dict[str, Any]] = []
     seen: set[str] = set()
@@ -393,6 +592,7 @@ def health() -> dict[str, Any]:
         "kinopoisk": bool(KINOPOISK_API_KEY),
         "kinobox": bool(KINOBOX_API_URL),
         "kodik": bool(KODIK_TOKEN),
+        "kinobd": bool(KINOBD_API_URL),
     }
 
 
@@ -548,9 +748,11 @@ def get_movie_players(movie_id: int) -> dict[str, Any]:
 
     kinobox_players: list[dict[str, Any]] = []
     kodik_players: list[dict[str, Any]] = []
+    kinobd_players: list[dict[str, Any]] = []
     statuses = [
         provider_status("Kinobox", bool(KINOBOX_API_URL)),
         provider_status("Kodik", bool(KODIK_TOKEN)),
+        provider_status("KinoBD", bool(KINOBD_API_URL)),
     ]
 
     try:
@@ -571,7 +773,16 @@ def get_movie_players(movie_id: int) -> dict[str, Any]:
         statuses[1]["error"] = str(exc)[:220]
         kodik_players = []
 
-    players = merge_players(kinobox_players, kodik_players)
+    try:
+        kinobd_players = get_kinobd_players(kp_id)
+        statuses[2]["ok"] = True
+        statuses[2]["count"] = len(kinobd_players)
+        statuses[2]["error"] = ""
+    except Exception as exc:
+        statuses[2]["error"] = str(exc)[:220]
+        kinobd_players = []
+
+    players = merge_players(kinobox_players, kodik_players, kinobd_players)
     return {
         "players": players,
         "providers": statuses,
