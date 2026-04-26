@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>FirstTest Cinema</title>
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body>
+    <div class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">Личный кинотеатр</p>
+          <h1>FirstTest Cinema</h1>
+        </div>
+        <button id="tokenButton" class="icon-button" title="Админ-токен">⚙</button>
+      </header>
+
+      <main class="workspace">
+        <section class="library">
+          <div class="toolbar">
+            <input id="searchInput" type="search" placeholder="Поиск по названию или жанру" />
+            <select id="statusFilter" aria-label="Фильтр списка">
+              <option value="all">Все</option>
+              <option value="planned">В планах</option>
+              <option value="watching">Смотрю</option>
+              <option value="watched">Просмотрено</option>
+              <option value="favorite">Любимое</option>
+            </select>
+            <button id="addButton">Добавить</button>
+          </div>
+          <div id="movies" class="movie-grid" aria-live="polite"></div>
+        </section>
+
+        <aside class="details" id="details">
+          <div class="empty-state">
+            <span>Выбери фильм</span>
+            <p>Здесь появятся плеер, заметки, рейтинг и комментарии.</p>
+          </div>
+        </aside>
+      </main>
+    </div>
+
+    <dialog id="movieDialog">
+      <form id="movieForm" method="dialog">
+        <h2>Новый фильм</h2>
+        <label>Название<input name="title" required /></label>
+        <label>Год<input name="year" type="number" min="1888" max="2100" /></label>
+        <label>Жанр<input name="genre" /></label>
+        <label>Постер URL<input name="poster_url" type="url" /></label>
+        <label>Плеер URL<input name="player_url" placeholder="https://www.youtube.com/embed/..." /></label>
+        <label>Легальный источник<input name="source_url" type="url" /></label>
+        <label>Описание<textarea name="description" rows="4"></textarea></label>
+        <div class="dialog-actions">
+          <button type="button" id="cancelMovie">Отмена</button>
+          <button type="submit">Сохранить</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="/assets/app.js" type="module"></script>
+  </body>
+</html>
