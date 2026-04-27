@@ -22,6 +22,11 @@
           <p class="eyebrow">Личный кинотеатр</p>
         </div>
         <div class="admin-box">
+          <div class="profile-switcher" aria-label="Профиль">
+            <select id="profileSelect"></select>
+            <button id="newProfileButton" class="icon-button" type="button" title="Добавить профиль">＋</button>
+            <button id="deleteProfileButton" class="icon-button danger-button" type="button" title="Удалить профиль">×</button>
+          </div>
           <span id="tokenStatus">Вход выполнен</span>
           <button id="logoutButton" class="icon-button" title="Выйти">↪</button>
         </div>
@@ -50,6 +55,24 @@
         </aside>
       </main>
     </div>
+
+    <dialog id="profileDialog">
+      <form id="profileForm" method="dialog">
+        <h2>Новый профиль</h2>
+        <label>
+          Имя
+          <input id="profileNameInput" type="text" maxlength="80" placeholder="Например, Алиса" required />
+        </label>
+        <div>
+          <p class="field-label">Аватарка</p>
+          <div id="avatarPicker" class="avatar-grid" aria-label="Выбор аватарки"></div>
+        </div>
+        <div class="dialog-actions">
+          <button id="cancelProfileButton" class="secondary-button" type="button">Отмена</button>
+          <button type="submit">Создать</button>
+        </div>
+      </form>
+    </dialog>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
     <script src="/assets/app.js" type="module"></script>

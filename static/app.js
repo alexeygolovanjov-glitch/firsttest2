@@ -1,4 +1,6 @@
 const state = {
+  profiles: [],
+  selectedProfileId: Number(localStorage.getItem('selectedProfileId')) || null,
   library: [],
   searchResults: [],
   selected: null,
@@ -6,8 +8,32 @@ const state = {
   loadingPlayersFor: null,
   loadingLibraryPlayersFor: null,
   token: localStorage.getItem('adminToken') || '',
-  searchTimer: null
+  searchTimer: null,
+  profileAvatar: '🙂'
 }
+
+const avatars = [
+  '🙂',
+  '😎',
+  '🤓',
+  '🥳',
+  '👩',
+  '👨',
+  '👧',
+  '👦',
+  '👶',
+  '🧑',
+  '👵',
+  '👴',
+  '🐱',
+  '🐶',
+  '🦊',
+  '🐼',
+  '🐸',
+  '🦄',
+  '🐵',
+  '🐯'
+]
 
 const lockScreen = document.querySelector('#lockScreen')
 const appShell = document.querySelector('#appShell')
@@ -19,6 +45,14 @@ const detailsEl = document.querySelector('#details')
 const searchInput = document.querySelector('#searchInput')
 const statusFilter = document.querySelector('#statusFilter')
 const tokenStatus = document.querySelector('#tokenStatus')
+const profileSelect = document.querySelector('#profileSelect')
+const newProfileButton = document.querySelector('#newProfileButton')
+const deleteProfileButton = document.querySelector('#deleteProfileButton')
+const profileDialog = document.querySelector('#profileDialog')
+const profileForm = document.querySelector('#profileForm')
+const profileNameInput = document.querySelector('#profileNameInput')
+const avatarPicker = document.querySelector('#avatarPicker')
+const cancelProfileButton = document.querySelector('#cancelProfileButton')
 const toast = document.querySelector('#toast')
 
 const statusLabels = {
@@ -74,6 +108,7 @@ async function verifyToken(token) {
   await api('/api/auth/check')
   localStorage.setItem('adminToken', state.token)
   setAuthenticated(true)
+  await loadProfiles()
   await loadLibrary()
 }
 
@@ -100,6 +135,68 @@ function currentItems() {
   return searchInput.value.trim() ? state.searchResults : state.library
 }
 
+function currentProfileId() {
+  return state.selectedProfileId || state.profiles[0]?.id || 1
+}
+
+async function loadProfiles() {
+  state.profiles = await api('/api/profiles')
+  if (!state.profiles.length) return
+
+  const storedProfileExists = state.profiles.some((profile) => profile.id === state.selectedProfileId)
+  if (!state.selectedProfileId || !storedProfileExists) {
+    state.selectedProfileId = state.profiles[0].id
+    localStorage.setItem('selectedProfileId', String(state.selectedProfileId))
+  }
+  renderProfiles()
+}
+
+function renderProfiles() {
+  profileSelect.innerHTML = state.profiles
+    .map(
+      (profile) => `
+        <option value="${profile.id}" ${profile.id === state.selectedProfileId ? 'selected' : ''}>
+          ${escapeHtml(profile.avatar)} ${escapeHtml(profile.name)}
+        </option>
+      `
+    )
+    .join('')
+  deleteProfileButton.disabled = state.profiles.length <= 1
+}
+
+function renderAvatarPicker() {
+  avatarPicker.innerHTML = avatars
+    .map(
+      (avatar) => `
+        <button class="avatar-choice ${avatar === state.profileAvatar ? 'active' : ''}" type="button" data-avatar="${escapeHtml(avatar)}">
+          ${escapeHtml(avatar)}
+        </button>
+      `
+    )
+    .join('')
+}
+
+function openProfileDialog() {
+  state.profileAvatar = avatars[0]
+  profileNameInput.value = ''
+  renderAvatarPicker()
+  profileDialog.showModal()
+  profileNameInput.focus()
+}
+
+function resetProfileView() {
+  searchInput.value = ''
+  state.searchResults = []
+  state.selected = null
+  state.selectedPlayer = null
+  detailsEl.innerHTML = `
+    <div class="empty-state">
+      <span>Найди фильм</span>
+      <p>Клик по обложке подгрузит плееры.</p>
+    </div>
+  `
+}
+
 function posterFor(movie) {
   return movie.poster_url || '/assets/poster-placeholder.svg'
 }
@@ -121,6 +218,7 @@ function mergeSavedPlayer(savedPlayer, players) {
 async function loadLibrary() {
   const params = new URLSearchParams()
   params.set('status', statusFilter.value)
+  params.set('profile_id', currentProfileId())
   state.library = await api(`/api/movies?${params.toString()}`)
   renderMovies()
   if (!state.selected && state.library[0]) selectLibraryMovie(state.library[0].id)
@@ -371,6 +469,7 @@ function bindDetailActions() {
           description: movie.description || '',
           poster_url: movie.poster_url || '',
           player_url: state.selectedPlayer?.iframe || '',
+          profile_id: currentProfileId(),
           source_url: movie.kp_id ? `https://www.kinopoisk.ru/film/${movie.kp_id}/` : '',
           genre: movie.genre || '',
           list_status: 'watching'
@@ -451,6 +550,62 @@ searchInput.addEventListener('input', () => {
 })
 
 statusFilter.addEventListener('change', () => loadLibrary())
+
+profileSelect.addEventListener('change', async (event) => {
+  state.selectedProfileId = Number(event.target.value)
+  localStorage.setItem('selectedProfileId', String(state.selectedProfileId))
+  resetProfileView()
+  await loadLibrary()
+})
+
+newProfileButton.addEventListener('click', openProfileDialog)
+
+deleteProfileButton.addEventListener('click', async () => {
+  const profile = state.profiles.find((item) => item.id === currentProfileId())
+  if (!profile) return
+  if (!confirm(`Удалить профиль "${profile.name}" и его список фильмов?`)) return
+
+  await runAdminAction(async () => {
+    await api(`/api/profiles/${profile.id}`, { method: 'DELETE' })
+    if (state.selectedProfileId === profile.id) {
+      localStorage.removeItem('selectedProfileId')
+      state.selectedProfileId = null
+    }
+    resetProfileView()
+    await loadProfiles()
+    await loadLibrary()
+  }, 'Профиль удалён')
+})
+
+avatarPicker.addEventListener('click', (event) => {
+  const button = event.target.closest('.avatar-choice')
+  if (!button) return
+  state.profileAvatar = button.dataset.avatar || avatars[0]
+  renderAvatarPicker()
+})
+
+cancelProfileButton.addEventListener('click', () => {
+  profileDialog.close()
+})
+
+profileForm.addEventListener('submit', async (event) => {
+  event.preventDefault()
+  const name = profileNameInput.value.trim()
+  if (!name) return
+
+  await runAdminAction(async () => {
+    const profile = await api('/api/profiles', {
+      method: 'POST',
+      body: JSON.stringify({ name, avatar: state.profileAvatar })
+    })
+    state.selectedProfileId = profile.id
+    localStorage.setItem('selectedProfileId', String(profile.id))
+    profileDialog.close()
+    resetProfileView()
+    await loadProfiles()
+    await loadLibrary()
+  }, 'Профиль создан')
+})
 
 loginForm.addEventListener('submit', async (event) => {
   event.preventDefault()

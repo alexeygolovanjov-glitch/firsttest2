@@ -63,6 +63,7 @@ STATIC_DIR = BASE_DIR / "static"
 
 
 class MovieIn(BaseModel):
+    profile_id: int = Field(default=1, ge=1)
     kinopoisk_id: str = Field(default="", max_length=40)
     title: str = Field(min_length=1, max_length=180)
     original_title: str = Field(default="", max_length=180)
@@ -89,6 +90,11 @@ class NoteUpdate(BaseModel):
 
 class PlayerUpdate(BaseModel):
     player_url: str = Field(default="", max_length=1000)
+
+
+class ProfileIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    avatar: str = Field(default="🙂", min_length=1, max_length=20)
 
 
 class CommentIn(BaseModel):
@@ -122,8 +128,17 @@ def init_db() -> None:
     with db() as conn:
         conn.executescript(
             """
+            CREATE TABLE IF NOT EXISTS profiles (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                avatar TEXT NOT NULL DEFAULT '🙂',
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            );
+
             CREATE TABLE IF NOT EXISTS movies (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_id INTEGER NOT NULL DEFAULT 1,
                 kinopoisk_id TEXT NOT NULL DEFAULT '',
                 title TEXT NOT NULL,
                 original_title TEXT NOT NULL DEFAULT '',
@@ -137,7 +152,8 @@ def init_db() -> None:
                 rating INTEGER,
                 note TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY(profile_id) REFERENCES profiles(id) ON DELETE CASCADE
             );
 
             CREATE TABLE IF NOT EXISTS comments (
@@ -155,9 +171,28 @@ def init_db() -> None:
             BEGIN
                 UPDATE movies SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
             END;
+
+            CREATE TRIGGER IF NOT EXISTS profiles_updated_at
+            AFTER UPDATE ON profiles
+            FOR EACH ROW
+            BEGIN
+                UPDATE profiles SET updated_at = CURRENT_TIMESTAMP WHERE id = OLD.id;
+            END;
             """
         )
+        profile_count = conn.execute("SELECT COUNT(*) AS count FROM profiles").fetchone()["count"]
+        if profile_count == 0:
+            conn.executemany(
+                "INSERT INTO profiles(name, avatar) VALUES (?, ?)",
+                [
+                    ("Я", "🙂"),
+                    ("Жена", "👩"),
+                    ("Ребёнок", "👦"),
+                ],
+            )
+        ensure_column(conn, "movies", "profile_id", "INTEGER NOT NULL DEFAULT 1")
         ensure_column(conn, "movies", "kinopoisk_id", "TEXT NOT NULL DEFAULT ''")
+        conn.execute("UPDATE movies SET profile_id = 1 WHERE profile_id IS NULL OR profile_id < 1")
         conn.execute(
             """
             UPDATE movies
@@ -475,10 +510,50 @@ def check_auth() -> dict[str, Any]:
     return {"ok": True}
 
 
+@app.get("/api/profiles", dependencies=[Depends(require_admin)])
+def list_profiles() -> list[dict[str, Any]]:
+    with db() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, name, avatar, created_at, updated_at
+            FROM profiles
+            ORDER BY id ASC
+            """
+        ).fetchall()
+        return [dict_from_row(row) for row in rows]
+
+
+@app.post("/api/profiles", dependencies=[Depends(require_admin)])
+def create_profile(payload: ProfileIn) -> dict[str, Any]:
+    with db() as conn:
+        name = payload.name.strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="Profile name is required")
+        cursor = conn.execute(
+            "INSERT INTO profiles(name, avatar) VALUES (?, ?)",
+            (name, payload.avatar.strip() or "🙂"),
+        )
+        row = conn.execute("SELECT * FROM profiles WHERE id = ?", (cursor.lastrowid,)).fetchone()
+        return dict_from_row(row)
+
+
+@app.delete("/api/profiles/{profile_id}", dependencies=[Depends(require_admin)])
+def delete_profile(profile_id: int) -> dict[str, Any]:
+    with db() as conn:
+        count = conn.execute("SELECT COUNT(*) AS count FROM profiles").fetchone()["count"]
+        if count <= 1:
+            raise HTTPException(status_code=400, detail="Last profile cannot be deleted")
+        conn.execute("DELETE FROM movies WHERE profile_id = ?", (profile_id,))
+        result = conn.execute("DELETE FROM profiles WHERE id = ?", (profile_id,))
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Profile not found")
+        return {"ok": True}
+
+
 @app.get("/api/movies")
-def list_movies(query: str = "", status: str = "all") -> list[dict[str, Any]]:
-    filters = []
-    params: list[Any] = []
+def list_movies(query: str = "", status: str = "all", profile_id: int = 1) -> list[dict[str, Any]]:
+    filters = ["profile_id = ?"]
+    params: list[Any] = [profile_id]
     if query:
         filters.append("(title LIKE ? OR original_title LIKE ? OR genre LIKE ?)")
         like = f"%{query}%"
@@ -492,7 +567,7 @@ def list_movies(query: str = "", status: str = "all") -> list[dict[str, Any]]:
         rows = conn.execute(
             f"""
             SELECT id, title, original_title, year, description, poster_url, player_url,
-                   source_url, genre, list_status, rating, note, kinopoisk_id, created_at, updated_at
+                   source_url, genre, list_status, rating, note, kinopoisk_id, profile_id, created_at, updated_at
             FROM movies
             {where}
             ORDER BY updated_at DESC, id DESC
@@ -538,19 +613,23 @@ def get_players_by_kp_id(kp_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/import/kinopoisk/{kp_id}", dependencies=[Depends(require_admin)])
-def import_kinopoisk_movie(kp_id: int) -> dict[str, Any]:
+def import_kinopoisk_movie(kp_id: int, profile_id: int = 1) -> dict[str, Any]:
     payload = kinopoisk_request(f"/api/v2.2/films/{kp_id}")
     movie = normalize_kinopoisk_film(payload)
     with db() as conn:
-        existing = conn.execute("SELECT * FROM movies WHERE source_url = ?", (movie["source_url"],)).fetchone()
+        existing = conn.execute(
+            "SELECT * FROM movies WHERE profile_id = ? AND source_url = ?",
+            (profile_id, movie["source_url"]),
+        ).fetchone()
         if existing:
             return dict_from_row(existing)
         cursor = conn.execute(
             """
-            INSERT INTO movies(kinopoisk_id, title, original_title, year, description, poster_url, player_url, source_url, genre)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO movies(profile_id, kinopoisk_id, title, original_title, year, description, poster_url, player_url, source_url, genre)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                profile_id,
                 movie["kinopoisk_id"],
                 movie["title"],
                 movie["original_title"],
@@ -569,10 +648,13 @@ def import_kinopoisk_movie(kp_id: int) -> dict[str, Any]:
 @app.post("/api/movies", dependencies=[Depends(require_admin)])
 def create_movie(payload: MovieIn) -> dict[str, Any]:
     with db() as conn:
+        profile = conn.execute("SELECT id FROM profiles WHERE id = ?", (payload.profile_id,)).fetchone()
+        if not profile:
+            raise HTTPException(status_code=404, detail="Profile not found")
         if payload.kinopoisk_id:
             existing = conn.execute(
-                "SELECT * FROM movies WHERE kinopoisk_id = ?",
-                (payload.kinopoisk_id,),
+                "SELECT * FROM movies WHERE profile_id = ? AND kinopoisk_id = ?",
+                (payload.profile_id, payload.kinopoisk_id),
             ).fetchone()
             if existing:
                 conn.execute(
@@ -588,10 +670,11 @@ def create_movie(payload: MovieIn) -> dict[str, Any]:
 
         cursor = conn.execute(
             """
-            INSERT INTO movies(kinopoisk_id, title, original_title, year, description, poster_url, player_url, source_url, genre, list_status)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO movies(profile_id, kinopoisk_id, title, original_title, year, description, poster_url, player_url, source_url, genre, list_status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                payload.profile_id,
                 payload.kinopoisk_id,
                 payload.title,
                 payload.original_title,

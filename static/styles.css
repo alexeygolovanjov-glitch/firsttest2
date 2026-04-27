@@ -56,6 +56,8 @@ button {
   display: flex;
   align-items: center;
   gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .admin-box span {
@@ -154,6 +156,18 @@ button {
   width: 44px;
   height: 44px;
   padding: 0;
+}
+
+.profile-switcher {
+  display: grid;
+  grid-template-columns: minmax(126px, 190px) 44px 44px;
+  gap: 8px;
+  align-items: center;
+}
+
+.profile-switcher select {
+  height: 44px;
+  padding-block: 8px;
 }
 
 .movie-grid {
@@ -335,6 +349,46 @@ dialog form {
   gap: 10px;
 }
 
+.field-label {
+  margin-bottom: 10px;
+  color: var(--muted);
+}
+
+.avatar-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(52px, 1fr));
+  gap: 10px;
+}
+
+.avatar-choice {
+  width: 100%;
+  aspect-ratio: 1;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid var(--line);
+  font-size: 1.55rem;
+}
+
+.avatar-choice:hover,
+.avatar-choice.active {
+  border-color: var(--accent);
+  background: rgba(185, 130, 255, 0.2);
+}
+
+.secondary-button {
+  background: rgba(255, 255, 255, 0.08);
+  color: var(--text);
+  border: 1px solid var(--line);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
 .error {
   color: #ff9f9f;
 }
@@ -381,8 +435,18 @@ dialog form {
   }
 
   .toolbar,
-  .controls-row {
+  .controls-row,
+  .profile-switcher {
     grid-template-columns: 1fr;
+  }
+
+  .topbar,
+  .admin-box {
+    align-items: stretch;
+  }
+
+  .topbar {
+    flex-direction: column;
   }
 
 }
