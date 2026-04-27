@@ -160,13 +160,17 @@ button {
 
 .profile-switcher {
   display: grid;
-  grid-template-columns: minmax(126px, 190px) 44px 44px;
+  grid-template-columns: minmax(150px, 210px) 44px 44px;
   gap: 8px;
   align-items: center;
+  flex: 0 0 auto;
+  width: max-content;
+  max-width: 100%;
 }
 
 .profile-switcher select {
   height: 44px;
+  min-width: 0;
   padding-block: 8px;
 }
 
@@ -435,9 +439,13 @@ button:disabled {
   }
 
   .toolbar,
-  .controls-row,
-  .profile-switcher {
+  .controls-row {
     grid-template-columns: 1fr;
+  }
+
+  .profile-switcher {
+    grid-template-columns: minmax(0, 1fr) 44px 44px;
+    width: 100%;
   }
 
   .topbar,
