@@ -180,12 +180,20 @@ def init_db() -> None:
             END;
             """
         )
-        profile_count = conn.execute("SELECT COUNT(*) AS count FROM profiles").fetchone()["count"]
-        if profile_count == 0:
+        existing_profiles = conn.execute("SELECT id, name FROM profiles ORDER BY id").fetchall()
+        if not existing_profiles:
             conn.executemany(
                 "INSERT INTO profiles(name, avatar) VALUES (?, ?)",
                 [
                     ("Я", "🙂"),
+                    ("Жена", "👩"),
+                    ("Ребёнок", "👦"),
+                ],
+            )
+        elif len(existing_profiles) == 1 and existing_profiles[0]["name"] == "Я":
+            conn.executemany(
+                "INSERT INTO profiles(name, avatar) VALUES (?, ?)",
+                [
                     ("Жена", "👩"),
                     ("Ребёнок", "👦"),
                 ],

@@ -45,19 +45,19 @@ button {
 
 .topbar {
   min-height: 62px;
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr auto;
   align-items: center;
-  justify-content: space-between;
   gap: 20px;
   border-bottom: 1px solid var(--line);
 }
 
 .admin-box {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto auto 44px;
   align-items: center;
   gap: 10px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
+  justify-content: end;
 }
 
 .admin-box span {
@@ -154,24 +154,34 @@ button {
 
 .icon-button {
   width: 44px;
+  min-width: 44px;
   height: 44px;
   padding: 0;
+  display: inline-grid;
+  place-items: center;
+  line-height: 1;
 }
 
 .profile-switcher {
-  display: grid;
-  grid-template-columns: minmax(150px, 210px) 44px 44px;
+  display: flex;
+  flex-wrap: nowrap;
   gap: 8px;
   align-items: center;
   flex: 0 0 auto;
-  width: max-content;
+  width: min(320px, 100%);
   max-width: 100%;
 }
 
 .profile-switcher select {
+  flex: 1 1 auto;
+  width: auto;
   height: 44px;
   min-width: 0;
   padding-block: 8px;
+}
+
+.profile-switcher .icon-button {
+  flex: 0 0 44px;
 }
 
 .movie-grid {
@@ -443,18 +453,23 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
-  .profile-switcher {
-    grid-template-columns: minmax(0, 1fr) 44px 44px;
-    width: 100%;
-  }
-
-  .topbar,
-  .admin-box {
+  .topbar {
+    grid-template-columns: 1fr;
     align-items: stretch;
   }
 
-  .topbar {
-    flex-direction: column;
+  .admin-box {
+    grid-template-columns: 1fr 44px;
+    align-items: center;
+    justify-content: stretch;
+  }
+
+  .admin-box span {
+    display: none;
+  }
+
+  .profile-switcher {
+    width: 100%;
   }
 
 }
