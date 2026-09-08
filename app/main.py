@@ -527,7 +527,7 @@ def provider_status(name: str, configured: bool) -> dict[str, Any]:
     }
 
 
-def cached_poster_response(url: str) -> Response | FileResponse:
+def cached_poster_response(url: str):
     parsed = urllib.parse.urlparse(url)
     if parsed.scheme not in {"http", "https"} or not parsed.netloc:
         return FileResponse(STATIC_DIR / "poster-placeholder.svg", media_type="image/svg+xml")
@@ -690,7 +690,7 @@ def search_movies(query: str, limit: int = 8) -> list[dict[str, Any]]:
 
 
 @app.get("/api/poster")
-def proxy_poster(url: str) -> Response | FileResponse:
+def proxy_poster(url: str):
     return cached_poster_response(url)
 
 
