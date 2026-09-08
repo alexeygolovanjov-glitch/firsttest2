@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import hashlib
 import sqlite3
 import urllib.error
 import urllib.parse
@@ -10,7 +11,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -18,6 +19,7 @@ from pydantic import BaseModel, Field
 APP_NAME = os.getenv("APP_NAME", "Личный кинотеатр")
 ADMIN_TOKEN = os.getenv("ADMIN_TOKEN", "")
 DATABASE_PATH = Path(os.getenv("DATABASE_PATH", "/data/app.db"))
+POSTER_CACHE_DIR = Path(os.getenv("POSTER_CACHE_DIR", str(DATABASE_PATH.parent / "poster-cache")))
 KINOPOISK_API_KEY = os.getenv("KINOPOISK_API_KEY") or os.getenv("KINOPOISK_TECH_API_TOKEN", "")
 KINOPOISK_API_BASE = "https://kinopoiskapiunofficial.tech"
 KINOBD_API_URL = os.getenv("KINOBD_API_URL", "https://kinobd.net").rstrip("/")
@@ -243,6 +245,10 @@ def kinopoisk_request(path: str, params: dict[str, Any] | None = None) -> dict[s
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")[:500]
+        if exc.code == 402:
+            detail = "Kinopoisk API quota is exhausted"
+        elif exc.code == 429:
+            detail = "Kinopoisk API rate limit exceeded"
         raise HTTPException(status_code=exc.code, detail=detail or "Kinopoisk API error") from exc
     except urllib.error.URLError as exc:
         raise HTTPException(status_code=502, detail=f"Kinopoisk API is unavailable: {exc.reason}") from exc
@@ -260,6 +266,33 @@ def normalize_kinopoisk_search_item(item: dict[str, Any]) -> dict[str, Any]:
         "poster_url": item.get("posterUrlPreview") or item.get("posterUrl") or "",
         "description": item.get("description") or "",
     }
+
+
+def search_kinopoisk_v22(query: str, safe_limit: int) -> list[dict[str, Any]]:
+    payload = kinopoisk_request(
+        "/api/v2.2/films",
+        {
+            "keyword": query.strip(),
+            "order": "NUM_VOTE",
+            "page": 1,
+        },
+    )
+    films = payload.get("items") or []
+    return [
+        normalize_kinopoisk_search_item(item)
+        for item in films[:safe_limit]
+        if item.get("filmId") or item.get("kinopoiskId")
+    ]
+
+
+def search_kinopoisk_v21(query: str, safe_limit: int) -> list[dict[str, Any]]:
+    payload = kinopoisk_request("/api/v2.1/films/search-by-keyword", {"keyword": query.strip(), "page": 1})
+    films = payload.get("films") or []
+    return [
+        normalize_kinopoisk_search_item(item)
+        for item in films[:safe_limit]
+        if item.get("filmId") or item.get("kinopoiskId")
+    ]
 
 
 def normalize_kinopoisk_film(payload: dict[str, Any]) -> dict[str, Any]:
@@ -494,6 +527,50 @@ def provider_status(name: str, configured: bool) -> dict[str, Any]:
     }
 
 
+def cached_poster_response(url: str) -> Response | FileResponse:
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return FileResponse(STATIC_DIR / "poster-placeholder.svg", media_type="image/svg+xml")
+
+    POSTER_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    cache_key = hashlib.sha256(url.encode("utf-8")).hexdigest()
+    meta_path = POSTER_CACHE_DIR / f"{cache_key}.type"
+    data_path = POSTER_CACHE_DIR / f"{cache_key}.img"
+
+    if data_path.exists() and meta_path.exists():
+        media_type = meta_path.read_text(encoding="utf-8").strip() or "image/jpeg"
+        return Response(
+            data_path.read_bytes(),
+            media_type=media_type,
+            headers={"Cache-Control": "public, max-age=604800, immutable"},
+        )
+
+    request = urllib.request.Request(
+        url,
+        headers={
+            "User-Agent": PLAYER_API_USER_AGENT,
+            "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+            "Referer": "https://www.kinopoisk.ru/",
+        },
+        method="GET",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=12) as response:
+            media_type = response.headers.get_content_type() or "image/jpeg"
+            if not media_type.startswith("image/"):
+                raise ValueError("Poster response is not an image")
+            content = response.read(5 * 1024 * 1024 + 1)
+            if len(content) > 5 * 1024 * 1024:
+                raise ValueError("Poster is too large")
+    except Exception:
+        return FileResponse(STATIC_DIR / "poster-placeholder.svg", media_type="image/svg+xml")
+
+    data_path.write_bytes(content)
+    meta_path.write_text(media_type, encoding="utf-8")
+    return Response(content, media_type=media_type, headers={"Cache-Control": "public, max-age=604800, immutable"})
+
+
 app = FastAPI(title=APP_NAME)
 app.mount("/assets", StaticFiles(directory=STATIC_DIR), name="assets")
 
@@ -589,9 +666,10 @@ def list_movies(query: str = "", status: str = "all", profile_id: int = 1) -> li
 def search_kinopoisk(query: str) -> list[dict[str, Any]]:
     if not query.strip():
         return []
-    payload = kinopoisk_request("/api/v2.1/films/search-by-keyword", {"keyword": query.strip(), "page": 1})
-    films = payload.get("films") or []
-    return [normalize_kinopoisk_search_item(item) for item in films if item.get("filmId") or item.get("kinopoiskId")]
+    try:
+        return search_kinopoisk_v22(query, 12)
+    except HTTPException:
+        return search_kinopoisk_v21(query, 12)
 
 
 @app.get("/api/search")
@@ -599,13 +677,21 @@ def search_movies(query: str, limit: int = 8) -> list[dict[str, Any]]:
     if not query.strip():
         return []
     safe_limit = max(1, min(limit, 12))
-    payload = kinopoisk_request("/api/v2.1/films/search-by-keyword", {"keyword": query.strip(), "page": 1})
-    films = payload.get("films") or []
-    return [
-        normalize_kinopoisk_search_item(item)
-        for item in films[:safe_limit]
-        if item.get("filmId") or item.get("kinopoiskId")
-    ]
+    try:
+        results = search_kinopoisk_v22(query, safe_limit)
+        if results:
+            return results
+    except HTTPException as v22_error:
+        try:
+            return search_kinopoisk_v21(query, safe_limit)
+        except HTTPException:
+            raise v22_error
+    return search_kinopoisk_v21(query, safe_limit)
+
+
+@app.get("/api/poster")
+def proxy_poster(url: str) -> Response | FileResponse:
+    return cached_poster_response(url)
 
 
 @app.get("/api/players/{kp_id}")
@@ -819,11 +905,11 @@ def add_comment(movie_id: int, payload: CommentIn) -> dict[str, Any]:
 
 @app.get("/")
 def index() -> FileResponse:
-    return FileResponse(STATIC_DIR / "index.html")
+    return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/{path:path}")
 def spa_fallback(request: Request, path: str) -> FileResponse:
     if path.startswith("api/"):
         raise HTTPException(status_code=404, detail="Not found")
-    return FileResponse(STATIC_DIR / "index.html")
+    return FileResponse(STATIC_DIR / "index.html", headers={"Cache-Control": "no-cache"})

@@ -77,7 +77,11 @@ async function api(path, options = {}) {
   })
   if (!response.ok) {
     const text = await response.text()
-    throw new Error(text || `HTTP ${response.status}`)
+    let detail = text
+    try {
+      detail = JSON.parse(text).detail || text
+    } catch {}
+    throw new Error(detail || `HTTP ${response.status}`)
   }
   return response.json()
 }
@@ -198,7 +202,8 @@ function resetProfileView() {
 }
 
 function posterFor(movie) {
-  return movie.poster_url || '/assets/poster-placeholder.svg'
+  if (!movie.poster_url) return '/assets/poster-placeholder.svg'
+  return `/api/poster?url=${encodeURIComponent(movie.poster_url)}`
 }
 
 function preferTurbo(players) {
@@ -241,7 +246,15 @@ async function searchRemote(query) {
       moviesEl.innerHTML = '<p class="error">На сервере не задан KINOPOISK_API_KEY.</p>'
       return
     }
-    moviesEl.innerHTML = '<p class="error">Поиск сейчас не ответил.</p>'
+    if (message.includes('quota') || message.includes('402')) {
+      moviesEl.innerHTML = '<p class="error">Лимит Kinopoisk API на сегодня закончился.</p>'
+      return
+    }
+    if (message.includes('rate limit') || message.includes('429')) {
+      moviesEl.innerHTML = '<p class="error">Kinopoisk API просит притормозить. Попробуй ещё раз через минуту.</p>'
+      return
+    }
+    moviesEl.innerHTML = `<p class="error">Поиск сейчас не ответил: ${escapeHtml(message.slice(0, 160))}</p>`
     console.error(error)
   }
 }
@@ -263,7 +276,7 @@ function renderMovies() {
       const playerInfo = isSearch ? 'Кинопоиск' : statusLabels[movie.list_status] || 'Без списка'
       return `
         <button class="movie-tile ${active ? 'active' : ''}" data-id="${escapeHtml(id)}" data-mode="${isSearch ? 'search' : 'library'}">
-          <img src="${escapeHtml(posterFor(movie))}" alt="" loading="lazy" />
+          <img src="${escapeHtml(posterFor(movie))}" alt="" loading="lazy" onerror="this.onerror=null;this.src='/assets/poster-placeholder.svg'" />
           <span>${escapeHtml(movie.title)}</span>
           <small>${escapeHtml(movie.year || 'Без года')} · ${escapeHtml(playerInfo)}</small>
         </button>
